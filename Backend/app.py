@@ -1,7 +1,16 @@
 from flask import Flask, jsonify, request
 import mysql.connector
 from db_connection import get_db_connection
-
+from inventory_logic import (
+    get_all_products,
+    add_product,
+    update_product,
+    delete_product,
+    record_stock_in,
+    record_stock_out,
+    get_low_stock_products,
+    get_all_transactions
+)
 app = Flask(__name__)
 
 @app.route("/")
@@ -40,44 +49,21 @@ def test_db():
         if connection is not None and connection.is_connected():
             connection.close()
 
-
-
 @app.route("/products", methods=["GET"])
 def get_products():
-    connection = None
-    cursor = None
-
     try:
-        connection = get_db_connection()
-        cursor = connection.cursor(dictionary=True)
+        products = get_all_products()
+        return jsonify(products), 200
 
-        cursor.execute("""
-            SELECT
-                p.*,
-                r.current_stock
-            FROM products p
-            LEFT JOIN current_stock_report r
-                ON p.product_id = r.product_id
-        """)
-
-        products = cursor.fetchall()
-
-        return jsonify(products)
-
-    except Exception:
+    except mysql.connector.Error:
         app.logger.exception("Failed to retrieve products")
-        return jsonify({"error": "Could not retrieve products"}), 500
-
-    finally:
-        if cursor is not None:
-            cursor.close()
-
-        if connection is not None and connection.is_connected():
-            connection.close()
+        return jsonify({
+            "error": "Could not retrieve products"
+        }), 500
 
 
 @app.route("/products", methods=["POST"])
-def add_product():
+def add_product_route():
     data = request.get_json(silent=True)
 
     if not isinstance(data, dict):
@@ -107,10 +93,12 @@ def add_product():
         reorder_level = int(reorder_level)
         unit_cost = float(unit_cost)
 
+        import math
+
         if opening_stock < 0 or reorder_level < 0 or unit_cost < 0:
             raise ValueError
 
-        if not __import__("math").isfinite(unit_cost):
+        if not math.isfinite(unit_cost):
             raise ValueError
 
     except (ValueError, TypeError, OverflowError):
@@ -118,61 +106,33 @@ def add_product():
             "error": "Stock, reorder level and cost must be valid non-negative numbers"
         }), 400
 
-    connection = None
-    cursor = None
-
     try:
-        connection = get_db_connection()
-        cursor = connection.cursor()
-
-        query = """
-            INSERT INTO products
-            (sku, product_name, category, opening_stock, reorder_level, unit_cost)
-            VALUES (%s, %s, %s, %s, %s, %s)
-        """
-
-        cursor.execute(query, (
+        product_id = add_product(
             sku.strip(),
             product_name.strip(),
             category.strip() if category else None,
             opening_stock,
             reorder_level,
             unit_cost
-        ))
-
-        connection.commit()
+        )
 
         return jsonify({
             "message": "Product added successfully",
-            "product_id": cursor.lastrowid
+            "product_id": product_id
         }), 201
 
     except mysql.connector.IntegrityError:
-        if connection is not None and connection.is_connected():
-            connection.rollback()
-
         return jsonify({
             "error": "Could not add product. Check whether the SKU already exists."
         }), 409
 
     except Exception:
         app.logger.exception("Failed to add product")
-
-        if connection is not None and connection.is_connected():
-            connection.rollback()
-
         return jsonify({"error": "Could not add product"}), 500
-
-    finally:
-        if cursor is not None:
-            cursor.close()
-
-        if connection is not None and connection.is_connected():
-            connection.close()
 
 
 @app.route("/products/<int:product_id>", methods=["PUT"])
-def update_product(product_id):
+def update_product_route(product_id):
     data = request.get_json(silent=True)
 
     if not isinstance(data, dict):
@@ -208,107 +168,47 @@ def update_product(product_id):
     except (ValueError, TypeError, OverflowError):
         return jsonify({"error": "Enter valid non-negative numbers"}), 400
 
-    connection = None
-    cursor = None
-
     try:
-        connection = get_db_connection()
-        cursor = connection.cursor()
-
-        query = """
-            UPDATE products
-            SET product_name = %s,
-                category = %s,
-                opening_stock = %s,
-                reorder_level = %s,
-                unit_cost = %s
-            WHERE product_id = %s
-        """
-
-        cursor.execute(query, (
+        updated = update_product(
+            product_id,
             product_name.strip(),
             category.strip() if category else None,
             opening_stock,
             reorder_level,
-            unit_cost,
-            product_id
-        ))
+            unit_cost
+        )
 
-        if cursor.rowcount == 0:
-            cursor.execute(
-                "SELECT product_id FROM products WHERE product_id = %s",
-                (product_id,)
-            )
+        if not updated:
+            return jsonify({"error": "Product not found"}), 404
 
-            if cursor.fetchone() is None:
-                return jsonify({"error": "Product not found"}), 404
-
-        connection.commit()
-
-        return jsonify({"message": "Product updated successfully"})
+        return jsonify({"message": "Product updated successfully"}), 200
 
     except Exception:
         app.logger.exception("Failed to update product")
-
-        if connection is not None and connection.is_connected():
-            connection.rollback()
-
         return jsonify({"error": "Could not update product"}), 500
 
-    finally:
-        if cursor is not None:
-            cursor.close()
-
-        if connection is not None and connection.is_connected():
-            connection.close()
 
 
 @app.route("/products/<int:product_id>", methods=["DELETE"])
-def delete_product(product_id):
-    connection = None
-    cursor = None
-
+def delete_product_route(product_id):
     try:
-        connection = get_db_connection()
-        cursor = connection.cursor()
+        deleted = delete_product(product_id)
 
-        cursor.execute(
-            "DELETE FROM products WHERE product_id = %s",
-            (product_id,)
-        )
-
-        if cursor.rowcount == 0:
-            connection.rollback()
+        if not deleted:
             return jsonify({"error": "Product not found"}), 404
-
-        connection.commit()
 
         return jsonify({
             "message": "Product deleted successfully"
         }), 200
 
     except mysql.connector.IntegrityError:
-        if connection is not None and connection.is_connected():
-            connection.rollback()
-
         return jsonify({
             "error": "Cannot delete this product because related records may exist"
         }), 409
 
     except Exception:
         app.logger.exception("Failed to delete product")
-
-        if connection is not None and connection.is_connected():
-            connection.rollback()
-
         return jsonify({"error": "Could not delete product"}), 500
-
-    finally:
-        if cursor is not None:
-            cursor.close()
-
-        if connection is not None and connection.is_connected():
-            connection.close()
 
 
 @app.route("/stock-in", methods=["POST"])
@@ -336,70 +236,29 @@ def stock_in():
     if notes is not None and not isinstance(notes, str):
         return jsonify({"error": "Notes must be text"}), 400
 
-    connection = None
-    cursor = None
-
     try:
-        connection = get_db_connection()
-        cursor = connection.cursor(dictionary=True)
-
-        cursor.execute(
-            "SELECT product_id FROM products WHERE sku = %s",
-            (sku.strip(),)
-        )
-        product = cursor.fetchone()
-
-        if product is None:
-            return jsonify({"error": "Product SKU not found"}), 404
-
-        cursor.execute(
-            """
-            INSERT INTO stock_transactions
-            (product_id, transaction_type, quantity, supplier_id, notes)
-            VALUES (%s, %s, %s, %s, %s)
-            """,
-            (
-                product["product_id"],
-                "STOCK_IN",
-                quantity,
-                supplier_id,
-                notes
-            )
+        result = record_stock_in(
+            sku.strip(), quantity, supplier_id, notes
         )
 
-        transaction_id = cursor.lastrowid
-        connection.commit()
+        if "error" in result:
+            return jsonify({"error": result["error"]}), 404
 
         return jsonify({
             "message": "Stock received successfully",
-            "transaction_id": transaction_id,
+            "transaction_id": result["transaction_id"],
             "sku": sku.strip(),
             "quantity_received": quantity
         }), 201
 
     except mysql.connector.IntegrityError:
-        if connection is not None and connection.is_connected():
-            connection.rollback()
-
         return jsonify({
             "error": "Invalid supplier or database constraint violation"
         }), 400
 
     except Exception:
         app.logger.exception("Stock-in failed")
-
-        if connection is not None and connection.is_connected():
-            connection.rollback()
-
         return jsonify({"error": "Could not record incoming stock"}), 500
-
-    finally:
-        if cursor is not None:
-            cursor.close()
-
-        if connection is not None and connection.is_connected():
-            connection.close()
-
 
 
 @app.route("/stock-out", methods=["POST"])
@@ -422,150 +281,63 @@ def stock_out():
     if notes is not None and not isinstance(notes, str):
         return jsonify({"error": "Notes must be text"}), 400
 
-    connection = None
-    cursor = None
-
     try:
-        connection = get_db_connection()
-        cursor = connection.cursor(dictionary=True)
+        result = record_stock_out(sku.strip(), quantity, notes)
 
-        cursor.execute(
-            "SELECT product_id FROM products WHERE sku = %s",
-            (sku.strip(),)
-        )
-        product = cursor.fetchone()
+        if result.get("error") == "Product SKU not found":
+            return jsonify({"error": result["error"]}), 404
 
-        if product is None:
-            return jsonify({"error": "Product SKU not found"}), 404
+        if result.get("error") == "Insufficient stock":
+            return jsonify({"error": result["error"]}), 400
 
-        cursor.execute(
-            "SELECT current_stock FROM current_stock_report WHERE product_id = %s",
-            (product["product_id"],)
-        )
-        stock = cursor.fetchone()
-
-        if stock is None or stock["current_stock"] is None:
-            return jsonify({"error": "Could not determine current stock"}), 500
-
-        if quantity > stock["current_stock"]:
-            return jsonify({"error": "Insufficient stock"}), 400
-
-        cursor.execute(
-            """
-            INSERT INTO stock_transactions
-            (product_id, transaction_type, quantity, supplier_id, notes)
-            VALUES (%s, %s, %s, %s, %s)
-            """,
-            (
-                product["product_id"],
-                "STOCK_OUT",
-                quantity,
-                None,
-                notes
-            )
-        )
-
-        transaction_id = cursor.lastrowid
-        connection.commit()
+        if "error" in result:
+            return jsonify({"error": result["error"]}), 500
 
         return jsonify({
             "message": "Stock-out recorded successfully",
-            "transaction_id": transaction_id,
+            "transaction_id": result["transaction_id"],
             "sku": sku.strip(),
             "quantity_removed": quantity,
-            "remaining_stock": stock["current_stock"] - quantity
+            "remaining_stock": result["remaining_stock"]
         }), 201
 
-    except mysql.connector.Error:
-        app.logger.exception("Stock-out database operation failed")
-
-        if connection is not None and connection.is_connected():
-            connection.rollback()
-
+    except Exception:
+        app.logger.exception("Stock-out failed")
         return jsonify({"error": "Could not record stock-out"}), 500
-
-    finally:
-        if cursor is not None:
-            cursor.close()
-
-        if connection is not None and connection.is_connected():
-            connection.close()
-
 
 
 @app.route("/low-stock", methods=["GET"])
 def get_low_stock():
-    connection = None
-    cursor = None
-
     try:
-        connection = get_db_connection()
-        cursor = connection.cursor(dictionary=True)
-
-        cursor.execute("SELECT * FROM low_stock_report")
-        products = cursor.fetchall()
+        products = get_low_stock_products()
 
         return jsonify({
             "count": len(products),
             "low_stock_products": products
         }), 200
 
-    except mysql.connector.Error:
+    except Exception:
         app.logger.exception("Failed to retrieve low-stock products")
-        return jsonify({"error": "Could not retrieve low-stock products"}), 500
-
-    finally:
-        if cursor is not None:
-            cursor.close()
-
-        if connection is not None and connection.is_connected():
-            connection.close()
-
+        return jsonify({
+            "error": "Could not retrieve low-stock products"
+        }), 500
 
 
 @app.route("/transactions", methods=["GET"])
 def get_transactions():
-    connection = None
-    cursor = None
-
     try:
-        connection = get_db_connection()
-        cursor = connection.cursor(dictionary=True)
-
-        cursor.execute("""
-            SELECT
-                st.transaction_id,
-                p.sku,
-                p.product_name,
-                st.transaction_date,
-                st.transaction_type,
-                st.quantity,
-                st.notes
-            FROM stock_transactions st
-            JOIN products p
-                ON st.product_id = p.product_id
-            ORDER BY st.transaction_date DESC
-        """)
-
-        transactions = cursor.fetchall()
+        transactions = get_all_transactions()
 
         return jsonify({
             "count": len(transactions),
             "transactions": transactions
         }), 200
 
-    except mysql.connector.Error:
+    except Exception:
         app.logger.exception("Failed to retrieve transactions")
         return jsonify({
             "error": "Could not retrieve transactions"
         }), 500
-
-    finally:
-        if cursor is not None:
-            cursor.close()
-
-        if connection is not None and connection.is_connected():
-            connection.close()
 
 if __name__ == "__main__":
     app.run(debug=True)
