@@ -1,0 +1,14 @@
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Virtual environment
+.venv/
+venv/
+
+# Private environment variables
+.env
+
+# Local editor settings
+.vscode/
