@@ -300,12 +300,12 @@ def get_low_stock_products():
             connection.close()
 
 
+
 def get_all_transactions():
-    connection = None
+    connection = get_db_connection()
     cursor = None
 
     try:
-        connection = get_db_connection()
         cursor = connection.cursor(dictionary=True)
 
         cursor.execute("""
@@ -316,20 +316,21 @@ def get_all_transactions():
                 st.transaction_date,
                 st.transaction_type,
                 st.quantity,
-                st.notes
+                st.notes,
+                s.supplier_name
             FROM stock_transactions st
             JOIN products p
                 ON st.product_id = p.product_id
+            LEFT JOIN suppliers s
+                ON st.supplier_id = s.supplier_id
             ORDER BY st.transaction_date DESC
         """)
 
         return cursor.fetchall()
 
-    except Exception:
-        raise
-
     finally:
         if cursor is not None:
             cursor.close()
-        if connection is not None and connection.is_connected():
+
+        if connection.is_connected():
             connection.close()
