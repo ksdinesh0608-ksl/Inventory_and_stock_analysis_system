@@ -332,6 +332,33 @@ Reorder recommendations are based on configured stock thresholds. The system doe
 - Improve demand analysis and reorder recommendations.
 - Add automated alerts for low-stock products.
 
+## Live Deployment
+
+The Inventory and Stock Analysis System is deployed and accessible online.
+
+- **Live Website:** https://inventory-and-stock-analysis-system-coc4.onrender.com
+- **Backend:** Python, Flask, REST APIs
+- **Database:** MySQL hosted on Aiven
+- **Data Analysis:** Pandas, NumPy, Matplotlib
+- **Frontend:** HTML, CSS, JavaScript
+
+### Features
+
+- Product and supplier management
+- Stock-in and stock-out transactions
+- Current stock tracking and low-stock alerts
+- Inventory valuation and stock movement analysis
+- Interactive inventory dashboard with analytical charts
+
+### Running Locally
+
+1. Clone the GitHub repository.
+2. Create and activate a Python virtual environment.
+3. Install dependencies using `pip install -r requirements.txt`.
+4. Configure the required database environment variables.
+5. Start the Flask application using `python Backend/app.py`.
+
+**Note:** The live application may take a little time to respond after inactivity because it uses a free hosting plan.
 ## Team Collaboration
 
 The project is developed collaboratively using Git and GitHub.
