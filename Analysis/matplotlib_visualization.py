@@ -1,971 +1,400 @@
 
 import os
 import sys
-import textwrap
-from datetime import timedelta
+import traceback
 
-import numpy as np
+import matplotlib
+matplotlib.use("Agg")
+
 import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
-from matplotlib.colors import LinearSegmentedColormap, to_rgb
-from matplotlib.lines import Line2D
-from matplotlib.patches import Patch
-from matplotlib.ticker import FuncFormatter
+import matplotlib.ticker as mticker
+import pandas as pd
 
-ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = os.path.dirname(CURRENT_DIR)
 
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
 
-def _find_db_folder():
-    skip = {".venv", "__pycache__", ".git", "node_modules"}
+from Backend.db_connection import get_db_connection
 
-    for folder, dirs, files in os.walk(ROOT):
-        dirs[:] = [d for d in dirs if d not in skip]
+OUTPUT_DIR = CURRENT_DIR
 
-        if "db_connection.py" in files:
-            return folder
-
-    return None
-
-
-_db_folder = _find_db_folder()
-
-if _db_folder:
-    sys.path.insert(0, _db_folder)
-
-from db_connection import get_db_connection
-
-OUTPUT_DIR = os.path.dirname(os.path.abspath(__file__))
-
-BG = "#F7F6F0"
-PANEL = "#FFFFFF"
-TRACK = "#E3E9E2"
-GRID = "#E6EBE5"
-TEXT = "#254D3A"
-MUTED = "#738276"
-
-IN_COLOR = "#507A5A"
-OUT_COLOR = "#C98570"
-
-PALETTE = [
-    "#507A5A",
-    "#8FA995",
-    "#C98570",
-    "#B7C9B9",
-    "#6B8E78",
-    "#D9A08E",
-    "#7F9C89",
-    "#AEBDAE",
+CHART_FILES = [
+    "low_stock_products.png",
+    "fast_moving_products.png",
+    "stock_by_category.png",
+    "stock_movement_over_time.png",
+    "inventory_value_by_product.png"
 ]
 
+BG = "#f5f7f2"
+GREEN = "#49634d"
+DARK = "#304936"
+SAGE = "#91a78f"
+LIGHT_GREEN = "#c8d5c3"
+GOLD = "#c5a76b"
+GRID = "#e5eae1"
+TEXT = "#657267"
+
 plt.rcParams.update({
-    "font.family": "DejaVu Sans",
-    "font.size": 11,
-    "text.color": TEXT,
-    "axes.labelcolor": TEXT,
-    "xtick.color": TEXT,
-    "ytick.color": MUTED,
     "figure.facecolor": BG,
-    "axes.facecolor": PANEL,
+    "axes.facecolor": BG,
+    "axes.edgecolor": BG,
+    "axes.labelcolor": TEXT,
+    "axes.titlecolor": DARK,
+    "xtick.color": TEXT,
+    "ytick.color": TEXT,
+    "font.family": "DejaVu Sans",
+    "font.size": 9,
+    "axes.titlesize": 13,
+    "axes.titleweight": "bold",
+    "axes.labelsize": 9,
     "savefig.facecolor": BG,
-    "legend.frameon": False,
+    "savefig.edgecolor": BG
 })
 
 
-def inr(value):
-    if value >= 1e7:
-        return f"₹{value / 1e7:.2f} Cr"
+def fetch_data(query):
+    connection = get_db_connection()
 
-    if value >= 1e5:
-        return f"₹{value / 1e5:.2f} L"
-
-    if value >= 1e3:
-        return f"₹{value / 1e3:.1f}K"
-
-    return f"₹{value:,.0f}"
+    try:
+        return pd.read_sql_query(query, connection)
+    finally:
+        if connection.is_connected():
+            connection.close()
 
 
-def cat_of(value):
-    return value or "Uncategorized"
-
-
-def wrap(names, width=13):
-    return [
-        "\n".join(textwrap.wrap(str(name), width=width)) or str(name)
-        for name in names
-    ]
-
-
-def tone(color, amount):
-    r, g, b = to_rgb(color)
-
-    if amount >= 0:
-        return (
-            r + (1 - r) * amount,
-            g + (1 - g) * amount,
-            b + (1 - b) * amount,
-        )
-
-    k = 1 + amount
-
-    return r * k, g * k, b * k
-
-
-def gradient_bar(ax, x, width, height, color):
-    if height <= 0:
-        return
-
-    ax.bar(
-        x,
-        height,
-        width * 1.4,
-        color=color,
-        alpha=0.10,
-        linewidth=0,
-        zorder=2,
-    )
-
-    cmap = LinearSegmentedColormap.from_list(
-        "bar",
-        [tone(color, -0.25), tone(color, 0.20)],
-    )
-
-    ax.imshow(
-        np.linspace(0, 1, 128).reshape(-1, 1),
-        cmap=cmap,
-        aspect="auto",
-        origin="lower",
-        extent=(
-            x - width / 2,
-            x + width / 2,
-            0,
-            height,
-        ),
-        zorder=3,
-    )
-
-
-def style_axes(ax):
-    for spine in ax.spines.values():
-        spine.set_visible(False)
+def style_axis(ax, horizontal=False):
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["left"].set_visible(False)
+    ax.spines["bottom"].set_color(GRID)
 
     ax.set_axisbelow(True)
-
     ax.grid(
-        axis="y",
+        axis="x" if horizontal else "y",
         color=GRID,
-        linewidth=0.8,
-        linestyle=(0, (4, 4)),
+        linewidth=0.8
     )
 
-    ax.tick_params(length=0)
-
-
-def finish_bars(ax, names, ymax, y_format=None):
-    style_axes(ax)
-
-    ax.set_xlim(-0.65, len(names) - 0.35)
-    ax.set_ylim(0, ymax * 1.22)
-
-    ax.set_xticks(np.arange(len(names)))
-
-    ax.set_xticklabels(
-        wrap(names),
-        fontsize=10.5,
-        color=TEXT,
-    )
-
-    ax.tick_params(axis="x", pad=10)
-    ax.tick_params(axis="y", labelsize=9.5, pad=8)
-
-    if y_format:
-        ax.yaxis.set_major_formatter(
-            FuncFormatter(lambda value, _: y_format(value))
-        )
-
-
-def legend_below(ax, handles):
-    ax.legend(
-        handles=handles,
-        loc="upper center",
-        bbox_to_anchor=(0.5, -0.2),
-        ncol=min(len(handles), 5),
-        fontsize=10.5,
-        labelcolor=MUTED,
-        handlelength=1,
-        handleheight=1,
-        columnspacing=1.8,
-    )
-
-
-def chip(color, label):
-    return Patch(
-        facecolor=color,
-        edgecolor="none",
-        label=label,
-    )
-
-
-def bar_axes(n):
-    return plt.subplots(
-        figsize=(max(9, n * 1.15), 5.2)
-    )
+    ax.tick_params(length=0, pad=7)
 
 
 def save_chart(fig, filename):
+    output_path = os.path.join(OUTPUT_DIR, filename)
+
     fig.savefig(
-        os.path.join(OUTPUT_DIR, filename),
-        dpi=220,
+        output_path,
+        dpi=150,
         bbox_inches="tight",
-        pad_inches=0.4,
-        facecolor=BG,
+        pad_inches=0.25,
+        facecolor=BG
     )
 
     plt.close(fig)
 
+    if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
+        raise RuntimeError(f"Chart was not saved correctly: {filename}")
 
-def get_inventory():
-    connection = get_db_connection()
-
-    try:
-        cursor = connection.cursor()
-
-        cursor.execute("""
-            SELECT
-                product_name,
-                category,
-                current_stock,
-                reorder_level,
-                unit_cost
-            FROM current_stock_report
-        """)
-
-        return cursor.fetchall()
-
-    finally:
-        connection.close()
+    print(f"Saved {filename}: {os.path.getsize(output_path)} bytes")
 
 
-def category_colors():
-    cats = sorted({
-        cat_of(row[1])
-        for row in get_inventory()
-    })
-
-    return {
-        category: PALETTE[i % len(PALETTE)]
-        for i, category in enumerate(cats)
-    }
-
-
-def value_label(ax, x, y, text, size=10.5):
+def show_empty(ax, message="No data available"):
     ax.text(
-        x,
-        y,
-        text,
+        0.5, 0.5,
+        message,
+        transform=ax.transAxes,
         ha="center",
-        va="bottom",
-        fontsize=size,
-        fontweight="bold",
+        va="center",
         color=TEXT,
-        zorder=5,
+        fontsize=11
     )
-
+    ax.set_axis_off()
 
 
 def low_stock_chart():
-    rows = [
-        row
-        for row in get_inventory()
-        if float(row[2]) <= float(row[3])
-    ]
+    query = """
+        SELECT product_name, current_stock, reorder_level
+        FROM current_stock_report
+        WHERE current_stock < reorder_level
+        ORDER BY current_stock ASC
+    """
 
-    if not rows:
-        fig, ax = plt.subplots(figsize=(10, 5))
+    df = fetch_data(query)
 
-        ax.text(
-            0.5,
-            0.5,
-            "No low-stock products",
-            ha="center",
-            va="center",
-            fontsize=16,
-            color=MUTED,
-            transform=ax.transAxes,
+    fig, ax = plt.subplots(figsize=(8, 4.2))
+
+    ax.set_title("Low Stock Products", loc="left", pad=18)
+
+    if df.empty:
+        show_empty(ax)
+    else:
+        df = df.head(10)
+        bars = ax.barh(
+            df["product_name"],
+            df["current_stock"],
+            color=SAGE,
+            height=0.55
         )
 
-        ax.set_title("Low-Stock Products")
-        ax.set_xticks([])
-        ax.set_yticks([])
-
-        for spine in ax.spines.values():
-            spine.set_visible(False)
-
-        fig.tight_layout()
-        save_chart(fig, "low_stock_products.png")
-        plt.close(fig)
-
-        print("No low-stock products found.")
-        return
-
-    rows.sort(
-        key=lambda row: float(row[2]) / max(float(row[3]), 1)
-    )
-
-    rows = rows[:10]
-
-    colors = category_colors()
-
-    names = [row[0] for row in rows]
-    cats = [cat_of(row[1]) for row in rows]
-
-    current = np.array([
-        float(row[2])
-        for row in rows
-    ])
-
-    reorder = np.array([
-        float(row[3])
-        for row in rows
-    ])
-
-    x = np.arange(len(rows))
-
-    fig, ax = bar_axes(len(rows))
-
-    ax.bar(
-        x,
-        reorder,
-        0.78,
-        color=TRACK,
-        edgecolor=MUTED,
-        linewidth=1,
-        linestyle=(0, (3, 3)),
-        zorder=2,
-    )
-
-    for i in range(len(rows)):
-        gradient_bar(
-            ax,
-            x[i],
-            0.46,
-            current[i],
-            colors[cats[i]],
-        )
-
-        value_label(
-            ax,
-            x[i],
-            reorder[i] + reorder.max() * 0.02,
-            f"{current[i]:,.0f} / {reorder[i]:,.0f}",
-        )
-
-    finish_bars(ax, names, reorder.max())
-
-    used = [
-        category
-        for category in colors
-        if category in set(cats)
-    ]
-
-    legend_below(
-        ax,
-        [chip(colors[category], category) for category in used]
-        + [
-            Patch(
-                facecolor=TRACK,
-                edgecolor=MUTED,
-                linestyle=(0, (3, 3)),
-                label="Reorder level",
+        for bar, value in zip(bars, df["current_stock"]):
+            ax.text(
+                bar.get_width() + 0.2,
+                bar.get_y() + bar.get_height() / 2,
+                str(value),
+                va="center",
+                color=DARK,
+                fontsize=9
             )
-        ],
-    )
 
+        ax.invert_yaxis()
+        ax.set_xlabel("Current Stock")
+        style_axis(ax, horizontal=True)
+
+    fig.tight_layout()
     save_chart(fig, "low_stock_products.png")
-    plt.close(fig)
 
 
 def fast_moving_chart():
-    connection = get_db_connection()
+    query = """
+        SELECT p.product_name,
+               SUM(st.quantity) AS total_sold
+        FROM stock_transactions st
+        JOIN products p ON st.product_id = p.product_id
+        WHERE st.transaction_type = 'STOCK_OUT'
+        GROUP BY p.product_id, p.product_name
+        ORDER BY total_sold DESC
+        LIMIT 10
+    """
 
-    try:
-        cursor = connection.cursor()
+    df = fetch_data(query)
 
-        cursor.execute("""
-            SELECT
-                p.product_name,
-                c.category,
-                SUM(t.quantity) AS total_out
-            FROM products p
-            JOIN stock_transactions t
-                ON p.product_id = t.product_id
-            JOIN current_stock_report c
-                ON c.product_name = p.product_name
-            WHERE t.transaction_type = %s
-            GROUP BY
-                p.product_id,
-                p.product_name,
-                c.category
-            ORDER BY total_out DESC
-            LIMIT %s
-        """, ("STOCK_OUT", 10))
+    fig, ax = plt.subplots(figsize=(8, 4.2))
 
-        data = cursor.fetchall()
+    ax.set_title("Fast Moving Products", loc="left", pad=18)
 
-    finally:
-        connection.close()
-
-    if not data:
-        print("No stock-out transactions found.")
-        return
-
-    colors = category_colors()
-
-    names = [row[0] for row in data]
-    cats = [cat_of(row[1]) for row in data]
-
-    qty = np.array([
-        float(row[2])
-        for row in data
-    ])
-
-    x = np.arange(len(data))
-
-    fig, ax = bar_axes(len(data))
-
-    for i in range(len(data)):
-        gradient_bar(
-            ax,
-            x[i],
-            0.58,
-            qty[i],
-            colors[cats[i]],
+    if df.empty:
+        show_empty(ax)
+    else:
+        bars = ax.bar(
+            df["product_name"],
+            df["total_sold"],
+            color=GREEN,
+            width=0.58
         )
 
-        value_label(
-            ax,
-            x[i],
-            qty[i] + qty.max() * 0.02,
-            f"{qty[i]:,.0f}",
-            11,
-        )
+        for bar, value in zip(bars, df["total_sold"]):
+            ax.text(
+                bar.get_x() + bar.get_width() / 2,
+                bar.get_height(),
+                str(value),
+                ha="center",
+                va="bottom",
+                color=DARK,
+                fontsize=9
+            )
 
-    finish_bars(ax, names, qty.max())
+        ax.set_ylabel("Quantity Sold")
+        ax.tick_params(axis="x", rotation=20)
+        style_axis(ax)
 
-    used = [
-        category
-        for category in colors
-        if category in set(cats)
-    ]
-
-    legend_below(
-        ax,
-        [chip(colors[category], category) for category in used],
-    )
-
+    fig.tight_layout()
     save_chart(fig, "fast_moving_products.png")
 
 
 def category_chart():
-    data = get_inventory()
+    query = """
+        SELECT p.category,
+               SUM(c.current_stock) AS total_stock
+        FROM products p
+        JOIN current_stock_report c
+        ON p.product_id = c.product_id
+        GROUP BY p.category
+        ORDER BY total_stock DESC
+    """
 
-    if not data:
-        print("No inventory data found.")
-        return
+    df = fetch_data(query)
 
-    colors = category_colors()
-    totals = {}
+    fig, ax = plt.subplots(figsize=(8, 4.2))
 
-    for row in data:
-        category = cat_of(row[1])
+    ax.set_title("Stock by Category", loc="left", pad=18)
 
-        totals[category] = (
-            totals.get(category, 0)
-            + float(row[2])
+    if df.empty:
+        show_empty(ax)
+    else:
+        colors = [GREEN, SAGE, LIGHT_GREEN, GOLD, "#a7b5a1"]
+
+        wedges, _, _ = ax.pie(
+            df["total_stock"],
+            labels=None,
+            colors=colors[:len(df)],
+            startangle=90,
+            autopct=lambda p: f"{p:.0f}%" if p >= 5 else "",
+            pctdistance=0.72,
+            wedgeprops={
+                "width": 0.42,
+                "edgecolor": BG,
+                "linewidth": 3
+            },
+            textprops={"color": DARK, "fontsize": 9}
         )
 
-    items = sorted(
-        totals.items(),
-        key=lambda item: item[1],
-        reverse=True,
-    )
-
-    names = [name for name, _ in items]
-
-    values = np.array([
-        value
-        for _, value in items
-    ])
-
-    grand = values.sum()
-
-    if grand <= 0:
-        print("No stock available for category analysis.")
-        return
-
-    x = np.arange(len(names))
-
-    fig, ax = plt.subplots(
-        figsize=(max(8, len(names) * 1.6), 5.2)
-    )
-
-    for i, name in enumerate(names):
-        gradient_bar(
-            ax,
-            x[i],
-            0.54,
-            values[i],
-            colors[name],
+        ax.legend(
+            wedges,
+            df["category"].astype(str),
+            loc="center left",
+            bbox_to_anchor=(0.85, 0.5),
+            frameon=False,
+            fontsize=9
         )
 
-        value_label(
-            ax,
-            x[i],
-            values[i] + values.max() * 0.02,
-            f"{values[i]:,.0f}",
-            12,
-        )
+        ax.set_aspect("equal")
 
-        ax.text(
-            x[i],
-            values[i] + values.max() * 0.11,
-            f"{values[i] / grand * 100:.0f}%",
-            ha="center",
-            va="bottom",
-            fontsize=10,
-            fontweight="bold",
-            color=colors[name],
-            zorder=5,
-            bbox=dict(
-                boxstyle="round,pad=0.35,rounding_size=0.8",
-                facecolor=tone(colors[name], 0.75),
-                edgecolor="none",
-            ),
-        )
-
-    finish_bars(
-        ax,
-        names,
-        values.max() * 1.1,
-    )
-
+    fig.tight_layout()
     save_chart(fig, "stock_by_category.png")
 
 
 def stock_movement_chart():
-    connection = get_db_connection()
+    query = """
+        SELECT DATE(transaction_date) AS movement_date,
+               SUM(CASE
+                   WHEN transaction_type = 'STOCK_IN'
+                   THEN quantity ELSE 0
+               END) AS stock_in,
+               SUM(CASE
+                   WHEN transaction_type = 'STOCK_OUT'
+                   THEN quantity ELSE 0
+               END) AS stock_out
+        FROM stock_transactions
+        GROUP BY DATE(transaction_date)
+        ORDER BY movement_date
+    """
 
-    try:
-        cursor = connection.cursor()
+    df = fetch_data(query)
 
-        cursor.execute("""
-            SELECT
-                DATE(t.transaction_date),
-                c.category,
-                t.transaction_type,
-                SUM(t.quantity)
-            FROM stock_transactions t
-            JOIN products p
-                ON p.product_id = t.product_id
-            JOIN current_stock_report c
-                ON c.product_name = p.product_name
-            GROUP BY
-                DATE(t.transaction_date),
-                c.category,
-                t.transaction_type
-            ORDER BY DATE(t.transaction_date)
-        """)
+    fig, ax = plt.subplots(figsize=(8, 4.2))
 
-        data = cursor.fetchall()
+    ax.set_title("Stock Movement Over Time", loc="left", pad=18)
 
-    finally:
-        connection.close()
+    if df.empty:
+        show_empty(ax)
+    else:
+        df["movement_date"] = pd.to_datetime(df["movement_date"])
 
-    data = [
-        row
-        for row in data
-        if row[2] in ("STOCK_IN", "STOCK_OUT")
-    ]
-
-    if not data:
-        print("No stock movement data found.")
-        return
-
-    active_dates = sorted({
-        row[0]
-        for row in data
-    })
-
-    if len(active_dates) < 5:
-        totals = {}
-
-        for date, cat, kind, qty in data:
-            bucket = totals.setdefault(
-                cat_of(cat),
-                {
-                    "STOCK_IN": 0,
-                    "STOCK_OUT": 0,
-                },
-            )
-
-            bucket[kind] += float(qty)
-
-        names = sorted(
-            totals,
-            key=lambda category: (
-                totals[category]["STOCK_IN"]
-                + totals[category]["STOCK_OUT"]
-            ),
-            reverse=True,
+        ax.plot(
+            df["movement_date"],
+            df["stock_in"],
+            color=GREEN,
+            linewidth=2.5,
+            marker="o",
+            markersize=5,
+            label="Stock In"
         )
 
-        stock_in = np.array([
-            totals[name]["STOCK_IN"]
-            for name in names
-        ])
-
-        stock_out = np.array([
-            totals[name]["STOCK_OUT"]
-            for name in names
-        ])
-
-        x = np.arange(len(names))
-        width = 0.34
-
-        peak = max(
-            stock_in.max(),
-            stock_out.max(),
-            1,
+        ax.plot(
+            df["movement_date"],
+            df["stock_out"],
+            color=GOLD,
+            linewidth=2.5,
+            marker="o",
+            markersize=5,
+            label="Stock Out"
         )
 
-        fig, ax = plt.subplots(
-            figsize=(max(8, len(names) * 1.9), 5.2)
+        ax.fill_between(
+            df["movement_date"],
+            df["stock_in"],
+            color=GREEN,
+            alpha=0.08
         )
 
-        for i in range(len(names)):
-            gradient_bar(
-                ax,
-                x[i] - width / 2 - 0.02,
-                width,
-                stock_in[i],
-                IN_COLOR,
-            )
+        ax.set_ylabel("Quantity")
+        ax.legend(frameon=False, loc="upper left")
+        ax.tick_params(axis="x", rotation=20)
+        style_axis(ax)
 
-            gradient_bar(
-                ax,
-                x[i] + width / 2 + 0.02,
-                width,
-                stock_out[i],
-                OUT_COLOR,
-            )
-
-            value_label(
-                ax,
-                x[i] - width / 2 - 0.02,
-                stock_in[i] + peak * 0.02,
-                f"{stock_in[i]:,.0f}",
-                11,
-            )
-
-            value_label(
-                ax,
-                x[i] + width / 2 + 0.02,
-                stock_out[i] + peak * 0.02,
-                f"{stock_out[i]:,.0f}",
-                11,
-            )
-
-        finish_bars(ax, names, peak)
-
-        legend_below(
-            ax,
-            [
-                chip(IN_COLOR, "Stock in"),
-                chip(OUT_COLOR, "Stock out"),
-            ],
-        )
-
-        save_chart(
-            fig,
-            "stock_movement_over_time.png",
-        )
-
-        return
-
-    colors = category_colors()
-
-    latest = active_dates[-1]
-
-    start = max(
-        active_dates[0],
-        latest - timedelta(days=29),
-    )
-
-    dates = [
-        start + timedelta(days=i)
-        for i in range((latest - start).days + 1)
-    ]
-
-    per_cat = {}
-    overall = {}
-
-    for date, cat, kind, qty in data:
-        if not (start <= date <= latest):
-            continue
-
-        for bucket in (
-            per_cat.setdefault(cat_of(cat), {}),
-            overall,
-        ):
-            bucket.setdefault(
-                date,
-                {
-                    "STOCK_IN": 0,
-                    "STOCK_OUT": 0,
-                },
-            )
-
-            bucket[date][kind] += float(qty)
-
-    volume = {
-        category: sum(
-            values["STOCK_IN"] + values["STOCK_OUT"]
-            for values in category_data.values()
-        )
-        for category, category_data in per_cat.items()
-    }
-
-    ordered = sorted(
-        volume,
-        key=volume.get,
-        reverse=True,
-    )[:7]
-
-    panels = (
-        [("All categories", overall, TEXT)]
-        + [
-            (category, per_cat[category], colors[category])
-            for category in ordered
-        ]
-    )
-
-    ncols = 2
-    nrows = int(np.ceil(len(panels) / ncols))
-
-    fig, axes = plt.subplots(
-        nrows,
-        ncols,
-        figsize=(11.5, 3.3 * nrows),
-        squeeze=False,
-    )
-
-    axes = axes.flatten()
-
-    for ax, (title, bucket, title_color) in zip(axes, panels):
-        for key, color in (
-            ("STOCK_IN", IN_COLOR),
-            ("STOCK_OUT", OUT_COLOR),
-        ):
-            series = [
-                bucket.get(date, {}).get(key, 0)
-                for date in dates
-            ]
-
-            ax.fill_between(
-                dates,
-                series,
-                color=color,
-                alpha=0.12,
-                linewidth=0,
-            )
-
-            ax.plot(
-                dates,
-                series,
-                color=color,
-                linewidth=2.6,
-                solid_capstyle="round",
-            )
-
-            ax.scatter(
-                dates,
-                series,
-                s=26,
-                color=PANEL,
-                edgecolor=color,
-                linewidth=1.8,
-                zorder=4,
-            )
-
-        style_axes(ax)
-
-        ax.set_title(
-            title,
-            loc="left",
-            fontsize=13,
-            fontweight="bold",
-            color=title_color,
-            pad=12,
-        )
-
-        top = max(
-            [
-                bucket.get(date, {}).get(key, 0)
-                for date in dates
-                for key in ("STOCK_IN", "STOCK_OUT")
-            ] + [1]
-        )
-
-        ax.set_ylim(0, top * 1.18)
-        ax.set_xlim(dates[0], dates[-1])
-
-        ax.xaxis.set_major_locator(
-            mdates.AutoDateLocator(
-                minticks=3,
-                maxticks=5,
-            )
-        )
-
-        ax.xaxis.set_major_formatter(
-            mdates.DateFormatter("%d %b")
-        )
-
-        ax.tick_params(
-            axis="x",
-            labelsize=9.5,
-            pad=8,
-            colors=TEXT,
-        )
-
-        ax.tick_params(
-            axis="y",
-            labelsize=9,
-            pad=6,
-        )
-
-    for ax in axes[len(panels):]:
-        ax.axis("off")
-
-    fig.legend(
-        handles=[
-            Line2D(
-                [0],
-                [0],
-                color=IN_COLOR,
-                linewidth=4,
-                label="Stock in",
-            ),
-            Line2D(
-                [0],
-                [0],
-                color=OUT_COLOR,
-                linewidth=4,
-                label="Stock out",
-            ),
-        ],
-        loc="upper right",
-        ncol=2,
-        fontsize=11,
-        labelcolor=MUTED,
-        bbox_to_anchor=(0.97, 1.0),
-    )
-
-    fig.subplots_adjust(
-        top=0.88,
-        hspace=0.65,
-        wspace=0.18,
-    )
-
-    save_chart(
-        fig,
-        "stock_movement_over_time.png",
-    )
+    fig.tight_layout()
+    save_chart(fig, "stock_movement_over_time.png")
 
 
 def inventory_value_chart():
-    data = get_inventory()
+    query = """
+        SELECT p.product_name,
+               c.current_stock * p.unit_cost AS inventory_value
+        FROM products p
+        JOIN current_stock_report c
+        ON p.product_id = c.product_id
+        ORDER BY inventory_value DESC
+        LIMIT 10
+    """
 
-    if not data:
-        print("No inventory data found.")
-        return
+    df = fetch_data(query)
 
-    valued = [
-        (
-            row[0],
-            cat_of(row[1]),
-            float(row[2]) * float(row[4]),
+    fig, ax = plt.subplots(figsize=(8, 4.2))
+
+    ax.set_title("Inventory Value by Product", loc="left", pad=18)
+
+    if df.empty:
+        show_empty(ax)
+    else:
+        bars = ax.barh(
+            df["product_name"],
+            df["inventory_value"],
+            color=SAGE,
+            height=0.55
         )
-        for row in data
+
+        for bar, value in zip(bars, df["inventory_value"]):
+            ax.text(
+                bar.get_width(),
+                bar.get_y() + bar.get_height() / 2,
+                f"  ₹{value:,.0f}",
+                va="center",
+                color=DARK,
+                fontsize=8
+            )
+
+        ax.invert_yaxis()
+        ax.set_xlabel("Inventory Value (₹)")
+        ax.xaxis.set_major_formatter(
+            mticker.FuncFormatter(lambda x, _: f"₹{x:,.0f}")
+        )
+        style_axis(ax, horizontal=True)
+
+    fig.tight_layout()
+    save_chart(fig, "inventory_value_by_product.png")
+
+
+def generate_all_charts():
+    chart_functions = [
+        low_stock_chart,
+        fast_moving_chart,
+        category_chart,
+        stock_movement_chart,
+        inventory_value_chart
     ]
 
-    if sum(item[2] for item in valued) <= 0:
-        print("No inventory value available.")
-        return
+    for filename in CHART_FILES:
+        path = os.path.join(OUTPUT_DIR, filename)
+        if os.path.exists(path):
+            os.remove(path)
 
-    valued.sort(
-        key=lambda item: item[2],
-        reverse=True,
-    )
+    for function in chart_functions:
+        function()
 
-    top = valued[:10]
-    colors = category_colors()
+    for filename in CHART_FILES:
+        path = os.path.join(OUTPUT_DIR, filename)
 
-    names = [item[0] for item in top]
-    cats = [item[1] for item in top]
+        if not os.path.exists(path) or os.path.getsize(path) == 0:
+            raise RuntimeError(f"Missing or empty chart: {filename}")
 
-    values = np.array([
-        item[2]
-        for item in top
-    ])
-
-    x = np.arange(len(top))
-
-    fig, ax = bar_axes(len(top))
-
-    for i in range(len(top)):
-        gradient_bar(
-            ax,
-            x[i],
-            0.58,
-            values[i],
-            colors[cats[i]],
-        )
-
-        value_label(
-            ax,
-            x[i],
-            values[i] + values.max() * 0.02,
-            inr(values[i]),
-        )
-
-    finish_bars(
-        ax,
-        names,
-        values.max(),
-        y_format=inr,
-    )
-
-    used = [
-        category
-        for category in colors
-        if category in set(cats)
-    ]
-
-    legend_below(
-        ax,
-        [chip(colors[category], category) for category in used],
-    )
-
-    save_chart(
-        fig,
-        "inventory_value_by_product.png",
-    )
+    print("All five charts generated successfully.")
 
 
 if __name__ == "__main__":
-    low_stock_chart()
-    fast_moving_chart()
-    category_chart()
-    stock_movement_chart()
-    inventory_value_chart()
-
-    print("Matplotlib chart generation finished.")
+    try:
+        generate_all_charts()
+    except Exception:
+        traceback.print_exc()
+        sys.exit(1)
