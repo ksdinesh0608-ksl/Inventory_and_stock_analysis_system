@@ -1,6 +1,7 @@
 
 import os
 import sys
+import numpy as np
 import pandas as pd
 
 ANALYSIS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -11,161 +12,102 @@ if ANALYSIS_DIR not in sys.path:
 from Backend.db_connection import get_db_connection
 
 
-def fetch_data(query, params=None):
+def fetch_inventory():
     connection = get_db_connection()
 
     try:
         cursor = connection.cursor(dictionary=True)
-        cursor.execute(query, params or ())
+
+        cursor.execute("""
+            SELECT
+                p.product_id,
+                p.sku,
+                p.product_name,
+                p.category,
+                COALESCE(r.current_stock, p.opening_stock, 0) AS current_stock,
+                p.reorder_level,
+                p.unit_cost
+            FROM products p
+            LEFT JOIN current_stock_report r
+                ON p.product_id = r.product_id
+            ORDER BY p.product_name
+        """)
+
         return cursor.fetchall()
+
     finally:
         cursor.close()
         connection.close()
 
 
-def get_inventory_dataframe():
-    rows = fetch_data("""
-        SELECT
-            p.product_id,
-            p.sku,
-            p.product_name,
-            p.category,
-            COALESCE(r.current_stock, p.opening_stock, 0) AS current_stock,
-            p.reorder_level,
-            p.unit_cost
-        FROM products p
-        LEFT JOIN current_stock_report r
-            ON p.product_id = r.product_id
-        ORDER BY p.product_name
-    """)
+def run_numpy_analysis():
+    rows = fetch_inventory()
 
-    return pd.DataFrame(rows)
-
-
-def get_transaction_dataframe():
-    rows = fetch_data("""
-        SELECT
-            st.transaction_id,
-            p.product_id,
-            p.sku,
-            p.product_name,
-            st.transaction_date,
-            st.transaction_type,
-            st.quantity,
-            st.notes,
-            s.supplier_name
-        FROM stock_transactions st
-        JOIN products p
-            ON st.product_id = p.product_id
-        LEFT JOIN suppliers s
-            ON st.supplier_id = s.supplier_id
-        ORDER BY st.transaction_date DESC
-    """)
-
-    return pd.DataFrame(rows)
-
-
-def run_analysis():
-    inventory = get_inventory_dataframe()
-    transactions = get_transaction_dataframe()
-
-    if inventory.empty:
+    if not rows:
         print("No inventory records found.")
         return
 
-    inventory["current_stock"] = pd.to_numeric(
-        inventory["current_stock"], errors="coerce"
-    ).fillna(0)
+    df = pd.DataFrame(rows)
 
-    inventory["reorder_level"] = pd.to_numeric(
-        inventory["reorder_level"], errors="coerce"
-    ).fillna(0)
+    stock = np.asarray(df["current_stock"], dtype=float)
+    reorder = np.asarray(df["reorder_level"], dtype=float)
+    cost = np.asarray(df["unit_cost"], dtype=float)
 
-    inventory["unit_cost"] = pd.to_numeric(
-        inventory["unit_cost"], errors="coerce"
-    ).fillna(0)
+    stock = np.nan_to_num(stock, nan=0.0)
+    reorder = np.nan_to_num(reorder, nan=0.0)
+    cost = np.nan_to_num(cost, nan=0.0)
 
-    inventory["stock_value"] = (
-        inventory["current_stock"] * inventory["unit_cost"]
-    )
+    inventory_value = stock * cost
 
-    inventory["category"] = inventory["category"].fillna("Uncategorized")
+    print("\n--- NumPy Inventory Analysis ---")
 
-    print("\n--- Current Inventory ---")
-    print(inventory.to_string(index=False))
+    print("\nTotal Products:")
+    print(len(stock))
 
-    low_stock = inventory[
-        inventory["current_stock"] <= inventory["reorder_level"]
-    ]
+    print("\nTotal Stock Units:")
+    print(np.sum(stock))
 
-    print("\n--- Low Stock Products ---")
-    if low_stock.empty:
-        print("No low-stock products.")
-    else:
-        print(low_stock.to_string(index=False))
+    print("\nAverage Stock:")
+    print(round(np.mean(stock), 2))
 
-    sorted_inventory = inventory.sort_values(
-        by="current_stock",
-        ascending=True
-    )
+    print("\nHighest Stock:")
+    print(np.max(stock))
 
-    print("\n--- Inventory Sorted by Current Stock ---")
-    print(
-        sorted_inventory[
-            ["sku", "product_name", "current_stock", "reorder_level"]
-        ].to_string(index=False)
-    )
+    print("\nLowest Stock:")
+    print(np.min(stock))
 
-    category_summary = inventory.groupby("category").agg(
-        total_products=("product_id", "count"),
-        total_stock=("current_stock", "sum"),
-        total_value=("stock_value", "sum")
-    ).reset_index()
+    print("\nTotal Inventory Value:")
+    print(round(np.sum(inventory_value), 2))
 
-    print("\n--- Stock Summary by Category ---")
-    print(category_summary.to_string(index=False))
+    print("\nAverage Inventory Value per Product:")
+    print(round(np.mean(inventory_value), 2))
 
-    if transactions.empty:
-        print("\n--- Stock Movement Summary ---")
-        print("No stock transactions available.")
+    low_stock_mask = stock <= reorder
 
-        print("\n--- Fast-Moving Products ---")
-        print("No stock-out transactions available.")
-        return
+    print("\nLow Stock Product Count:")
+    print(np.count_nonzero(low_stock_mask))
 
-    transactions["quantity"] = pd.to_numeric(
-        transactions["quantity"], errors="coerce"
-    ).fillna(0)
+    print("\nLow Stock Products:")
+    for index in np.where(low_stock_mask)[0]:
+        print(
+            df.iloc[index]["product_name"],
+            "- Current:",
+            stock[index],
+            "- Reorder Level:",
+            reorder[index]
+        )
 
-    movement_summary = transactions.groupby("transaction_type").agg(
-        total_quantity=("quantity", "sum"),
-        total_transactions=("transaction_id", "count")
-    ).reset_index()
+    print("\nProducts Above Reorder Level:")
+    print(np.count_nonzero(stock > reorder))
 
-    print("\n--- Stock Movement Summary ---")
-    print(movement_summary.to_string(index=False))
+    print("\nStock Distribution:")
+    print("25th Percentile:", np.percentile(stock, 25))
+    print("50th Percentile:", np.percentile(stock, 50))
+    print("75th Percentile:", np.percentile(stock, 75))
 
-    stock_out = transactions[
-        transactions["transaction_type"] == "STOCK_OUT"
-    ]
-
-    fast_moving = stock_out.groupby(
-        ["product_id", "sku", "product_name"]
-    ).agg(
-        total_stock_out=("quantity", "sum")
-    ).reset_index()
-
-    fast_moving = fast_moving.sort_values(
-        by="total_stock_out",
-        ascending=False
-    )
-
-    print("\n--- Fast-Moving Products ---")
-    if fast_moving.empty:
-        print("No stock-out transactions available.")
-    else:
-        print(fast_moving.to_string(index=False))
+    print("\nInventory Value Array:")
+    print(inventory_value)
 
 
 if __name__ == "__main__":
-    run_analysis()
+    run_numpy_analysis()
