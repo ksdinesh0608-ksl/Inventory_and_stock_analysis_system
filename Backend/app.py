@@ -2,6 +2,7 @@
 import os
 import sys
 import math
+import hmac
 import subprocess
 from functools import wraps
 
@@ -29,12 +30,68 @@ from inventory_logic import (
     authenticate_user,
     get_user_by_id,
     get_pending_users,
+    create_admin_user,
     update_user_approval
 )
 
 
 app = Flask(__name__)
+@app.route("/setup-admin", methods=["POST"])
+def setup_admin():
+    expected_token = os.environ.get("ADMIN_SETUP_TOKEN")
+    supplied_token = request.headers.get("X-Admin-Setup-Token", "")
 
+    if not expected_token:
+        return jsonify({"error": "Admin setup is not configured"}), 503
+
+    if not hmac.compare_digest(supplied_token, expected_token):
+        return jsonify({"error": "Invalid setup token"}), 403
+
+    username = os.environ.get("ADMIN_USERNAME")
+    password = os.environ.get("ADMIN_PASSWORD")
+    email = os.environ.get("ADMIN_EMAIL")
+
+    if not all([username, password, email]):
+        return jsonify({"error": "Admin environment variables are missing"}), 500
+
+    connection = None
+    cursor = None
+
+    try:
+        connection = get_db_connection()
+        cursor = connection.cursor()
+
+        cursor.execute(
+            "SELECT COUNT(*) FROM users WHERE user_role = 'ADMIN'"
+        )
+        admin_count = cursor.fetchone()[0]
+
+        if admin_count > 0:
+            return jsonify({"error": "An admin account already exists"}), 409
+
+        create_admin_user(
+            "Stockwise Main Admin",
+            username,
+            email,
+            password
+        )
+
+        return jsonify({
+            "message": "Main admin account created successfully"
+        }), 201
+
+    except mysql.connector.IntegrityError:
+        return jsonify({"error": "Admin username or email already exists"}), 409
+
+    except Exception:
+        app.logger.exception("Admin setup failed")
+        return jsonify({"error": "Admin setup failed"}), 500
+
+    finally:
+        if cursor is not None:
+            cursor.close()
+        if connection is not None and connection.is_connected():
+            connection.close()
 app.secret_key = os.environ.get(
     "SECRET_KEY",
     "development-secret-key-change-before-deployment"
