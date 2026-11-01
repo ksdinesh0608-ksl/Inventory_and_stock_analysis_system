@@ -10,250 +10,357 @@ const state = {
     pendingUsers: [],
     chart: null,
     currentPage: "overview",
-    editingProduct: false
+    eventsBound: false
 };
 
-const $ = id => document.getElementById(id);
+const $ = (id) => document.getElementById(id);
 
-const money = value =>
+const money = (value) =>
     new Intl.NumberFormat("en-IN", {
         style: "currency",
         currency: "INR",
         maximumFractionDigits: 2
     }).format(Number(value) || 0);
 
-const escapeHTML = value =>
-    String(value ?? "").replace(/[&<>"']/g, char => ({
+const number = (value) =>
+    new Intl.NumberFormat("en-IN").format(Number(value) || 0);
+
+const escapeHTML = (value) =>
+    String(value ?? "").replace(/[&<>"']/g, (char) => ({
         "&": "&amp;",
         "<": "&lt;",
         ">": "&gt;",
         '"': "&quot;",
-        "'": "&#039;"
+        "'": "&#39;"
     })[char]);
 
-async function api(path, options = {}) {
-    const response = await fetch(API_BASE + path, {
-        ...options,
+async function apiRequest(url, options = {}) {
+    const config = {
         credentials: "include",
+        ...options,
         headers: {
             ...(options.body instanceof FormData ? {} : {
                 "Content-Type": "application/json"
             }),
             ...options.headers
         }
-    });
+    };
 
+    const response = await fetch(API_BASE + url, config);
     const contentType = response.headers.get("content-type") || "";
-    const data = contentType.includes("application/json")
-        ? await response.json()
-        : await response.text();
+
+    let data = {};
+
+    if (contentType.includes("application/json")) {
+        data = await response.json();
+    } else {
+        data.message = await response.text();
+    }
 
     if (!response.ok) {
-        throw new Error(data.message || data.error || data || "Request failed");
+        throw new Error(data.message || data.error || `Request failed (${response.status})`);
     }
 
     return data;
 }
 
-function isAdmin() {
-    return state.user?.user_role === "ADMIN";
-}
-
-function showToast(message, isError = false) {
+function showToast(message, type = "success") {
     const container = $("toastContainer");
+
     if (!container) {
         alert(message);
         return;
     }
 
     const toast = document.createElement("div");
-    toast.className = `toast ${isError ? "error" : "success"}`;
+    toast.className = `toast ${type === "error" ? "error" : ""}`;
     toast.textContent = message;
+
     container.appendChild(toast);
 
     setTimeout(() => toast.remove(), 3500);
 }
 
-function showMessage(id, message, isError = false) {
-    const element = $(id);
+function showMessage(elementId, message, type = "error") {
+    const element = $(elementId);
     if (!element) return;
 
     element.textContent = message;
-    element.classList.toggle("error", isError);
-    element.classList.toggle("success", !isError);
+    element.classList.toggle("success", type === "success");
+    element.classList.toggle("error", type === "error");
 }
 
-function showPage(page) {
-    state.currentPage = page;
+function clearMessage(elementId) {
+    showMessage(elementId, "");
+}
 
-    document.querySelectorAll(".page-section").forEach(section => {
-        section.classList.toggle("active", section.id === page);
-        section.classList.toggle("hidden", section.id !== page);
+function showAuthPage(page) {
+    [
+        "landingPage",
+        "loginPage",
+        "signupPage",
+        "pendingPage",
+        "appLayout"
+    ].forEach((id) => {
+        $(id)?.classList.add("hidden");
     });
 
-    document.querySelectorAll(".nav-link").forEach(link => {
-        link.classList.toggle("active", link.dataset.page === page);
-    });
+    $(page)?.classList.remove("hidden");
+}
 
-    const titles = {
-        overview: "Overview",
-        products: "Products",
-        "stock-in": "Stock In",
-        "stock-out": "Stock Out",
-        transactions: "Transactions",
-        "low-stock": "Low Stock",
-        analysis: "Stock Analysis",
-        users: "User Management",
-        suppliers: "Suppliers"
-    };
+function showLanding() {
+    showAuthPage("landingPage");
+}
 
-    if ($("pageTitle")) {
-        $("pageTitle").textContent = titles[page] || "Overview";
-    }
+function showLogin() {
+    showAuthPage("loginPage");
+    clearMessage("loginMessage");
+}
 
-    if (page === "users" && isAdmin()) loadPendingUsers();
-    if (page === "analysis") loadAnalysisImages();
+function showSignup() {
+    showAuthPage("signupPage");
+    clearMessage("signupMessage");
+}
+
+function showPending() {
+    showAuthPage("pendingPage");
+}
+
+function getUserName() {
+    return state.user?.full_name ||
+        state.user?.username ||
+        state.user?.name ||
+        "User";
+}
+
+function isAdmin() {
+    return String(state.user?.user_role || state.user?.role || "")
+        .toUpperCase() === "ADMIN";
 }
 
 function applyRolePermissions() {
     const admin = isAdmin();
 
-    document.querySelectorAll("[data-admin-only]").forEach(element => {
+    document.querySelectorAll("[data-admin-only]").forEach((element) => {
         element.classList.toggle("hidden", !admin);
     });
 
-    document.querySelectorAll("[data-staff-only]").forEach(element => {
-        element.classList.toggle("hidden", admin);
+    document.querySelectorAll(".nav-link[data-page]").forEach((element) => {
+        const page = element.dataset.page;
+        const adminPage = ["stock-in", "stock-out", "users"].includes(page);
+
+        element.classList.toggle("hidden", adminPage && !admin);
     });
 
-    const roleLabel = $("userRole");
-    if (roleLabel) {
-        roleLabel.textContent = admin ? "Administrator" : "Staff";
+    if ($("sidebarUserName")) {
+        $("sidebarUserName").textContent = getUserName();
     }
 
-    const nameLabel = $("userName");
-    if (nameLabel) {
-        nameLabel.textContent = state.user?.full_name || state.user?.username || "";
+    if ($("sidebarUserRole")) {
+        $("sidebarUserRole").textContent = admin ? "Administrator" : "Staff";
     }
 
-    document.querySelectorAll(".nav-link").forEach(link => {
-        if (link.dataset.adminOnly === "true") {
-            link.classList.toggle("hidden", !admin);
-        }
+    if ($("welcomeName")) {
+        $("welcomeName").textContent = `Welcome back, ${getUserName()}`;
+    }
+
+    if ($("rolePill")) {
+        $("rolePill").textContent = admin ? "ADMIN" : "STAFF";
+    }
+}
+
+function showPage(page) {
+    const adminPages = ["stock-in", "stock-out", "users"];
+
+    if (adminPages.includes(page) && !isAdmin()) {
+        showToast("You don't have permission to access this page.", "error");
+        return;
+    }
+
+    const section = $(`${page}Page`);
+
+    if (!section) return;
+
+    document.querySelectorAll(".page-section").forEach((element) => {
+        element.classList.remove("active");
     });
 
-    if (!admin && ["stock-in", "stock-out", "users"].includes(state.currentPage)) {
-        showPage("overview");
-    }
-}
+    section.classList.add("active");
 
-function showAuthPage(page) {
-    ["landingPage", "loginPage", "signupPage", "appLayout"].forEach(id => {
-        const element = $(id);
-        if (element) element.classList.add("hidden");
+    document.querySelectorAll(".nav-link[data-page]").forEach((element) => {
+        element.classList.toggle("active", element.dataset.page === page);
     });
 
-    const selected = $(page);
-    if (selected) selected.classList.remove("hidden");
-}
+    state.currentPage = page;
 
-async function checkSession() {
-    try {
-        const data = await api("/me");
-        state.user = data.user || data;
+    const titles = {
+        overview: "Overview",
+        products: "Products",
+        suppliers: "Suppliers",
+        "stock-in": "Stock In",
+        "stock-out": "Stock Out",
+        transactions: "Transactions",
+        "low-stock": "Low Stock",
+        analysis: "Stock Analysis",
+        users: "User Management"
+    };
 
-        if (!state.user || !state.user.user_id) {
-            showAuthPage("landingPage");
-            return;
-        }
+    if ($("pageTitle")) {
+        $("pageTitle").textContent = titles[page] || "Stockwise";
+    }
 
-        await enterDashboard();
-    } catch {
-        state.user = null;
-        showAuthPage("landingPage");
+    if (page === "analysis") {
+        loadAnalysisImages();
+    }
+
+    if (page === "users" && isAdmin()) {
+        loadPendingUsers();
     }
 }
 
-async function enterDashboard() {
-    showAuthPage("appLayout");
-    applyRolePermissions();
-    bindDashboardEvents();
-
-    if ($("todayDate")) {
-        $("todayDate").textContent = new Date().toLocaleDateString("en-IN", {
-            weekday: "long",
-            day: "numeric",
-            month: "long",
-            year: "numeric"
-        });
-    }
-
-    await loadDashboard();
+function getStock(product) {
+    return Number(
+        product.current_stock ??
+        product.stock ??
+        product.available_stock ??
+        product.opening_stock ??
+        0
+    );
 }
 
-async function login(event) {
-    event?.preventDefault();
+function getProductId(product) {
+    return product.product_id ?? product.id;
+}
+
+function getProductName(product) {
+    return product.product_name ?? product.name ?? "Unnamed product";
+}
+
+function getProductValue(product) {
+    return getStock(product) * Number(product.unit_cost || 0);
+}
+
+function isLowStock(product) {
+    return getStock(product) <= Number(product.reorder_level || 0);
+}
+
+function getTransactionDate(transaction) {
+    const value = transaction.transaction_date ||
+        transaction.created_at ||
+        transaction.date;
+
+    if (!value) return "—";
+
+    const date = new Date(value);
+
+    return Number.isNaN(date.getTime())
+        ? String(value)
+        : date.toLocaleDateString("en-IN");
+}
+
+function getTransactionType(transaction) {
+    return String(transaction.transaction_type || transaction.type || "")
+        .toUpperCase();
+}
+
+function getArray(data, key) {
+    if (Array.isArray(data)) return data;
+    if (Array.isArray(data?.[key])) return data[key];
+    return [];
+}
+
+/* AUTHENTICATION */
+
+function bindAuthEvents() {
+    $("landingLogin")?.addEventListener("click", showLogin);
+    $("landingSignup")?.addEventListener("click", showSignup);
+
+    $("loginToSignup")?.addEventListener("click", showSignup);
+    $("signupToLogin")?.addEventListener("click", showLogin);
+
+    $("backToLanding")?.addEventListener("click", showLanding);
+    $("backToLandingSignup")?.addEventListener("click", showLanding);
+
+    $("pendingLogin")?.addEventListener("click", showLogin);
+
+    $("loginForm")?.addEventListener("submit", handleLogin);
+    $("signupForm")?.addEventListener("submit", handleSignup);
+
+    $("logoutBtn")?.addEventListener("click", handleLogout);
+}
+
+async function handleLogin(event) {
+    event.preventDefault();
 
     const identifier = $("loginIdentifier")?.value.trim();
     const password = $("loginPassword")?.value;
 
     if (!identifier || !password) {
-        showMessage("loginMessage", "Enter your username/email and password.", true);
+        showMessage("loginMessage", "Enter your username/email and password.");
         return;
     }
 
+    const button = $("loginSubmit");
+    if (button) button.disabled = true;
+
     try {
-        const data = await api("/login", {
+        const data = await apiRequest("/login", {
             method: "POST",
-            body: JSON.stringify({
-                identifier,
-                password
-            })
+            body: JSON.stringify({ identifier, password })
         });
 
         if (data.status === "PENDING") {
-            showMessage("loginMessage", "Your account is waiting for admin approval.", true);
+            showPending();
             return;
         }
 
         if (data.status === "REJECTED") {
-            showMessage("loginMessage", "Your account request was rejected.", true);
+            showMessage("loginMessage", "Your account registration was rejected.");
             return;
         }
 
-        if (data.status !== "SUCCESS" && !data.user) {
-            showMessage("loginMessage", data.message || "Invalid login details.", true);
+        if (data.status === "INACTIVE") {
+            showMessage("loginMessage", "Your account is inactive. Contact the administrator.");
             return;
         }
 
-        state.user = data.user;
+        if (data.status && data.status !== "SUCCESS") {
+            showMessage("loginMessage", data.message || "Login failed.");
+            return;
+        }
+
+        state.user = data.user || data;
         await enterDashboard();
     } catch (error) {
-        showMessage("loginMessage", error.message, true);
+        showMessage("loginMessage", error.message || "Unable to login.");
+    } finally {
+        if (button) button.disabled = false;
     }
 }
 
-async function signup(event) {
-    event?.preventDefault();
+async function handleSignup(event) {
+    event.preventDefault();
 
     const fullName = $("signupFullName")?.value.trim();
     const username = $("signupUsername")?.value.trim();
     const email = $("signupEmail")?.value.trim();
     const password = $("signupPassword")?.value;
-    const confirmPassword = $("signupConfirmPassword")?.value;
 
-    if (!fullName || !username || !email || !password || !confirmPassword) {
-        showMessage("signupMessage", "Please fill in all fields.", true);
+    if (!fullName || !username || !email || !password) {
+        showMessage("signupMessage", "Please fill in all fields.");
         return;
     }
 
-    if (password !== confirmPassword) {
-        showMessage("signupMessage", "Passwords do not match.", true);
+    if (password.length < 6) {
+        showMessage("signupMessage", "Password must contain at least 6 characters.");
         return;
     }
+
+    const button = $("signupSubmit");
+    if (button) button.disabled = true;
 
     try {
-        const data = await api("/signup", {
+        const data = await apiRequest("/signup", {
             method: "POST",
             body: JSON.stringify({
                 full_name: fullName,
@@ -265,20 +372,25 @@ async function signup(event) {
 
         showMessage(
             "signupMessage",
-            data.message || "Account created. Wait for administrator approval."
+            data.message || "Registration submitted. Wait for administrator approval.",
+            "success"
         );
 
         $("signupForm")?.reset();
+
+        setTimeout(showPending, 1400);
     } catch (error) {
-        showMessage("signupMessage", error.message, true);
+        showMessage("signupMessage", error.message || "Registration failed.");
+    } finally {
+        if (button) button.disabled = false;
     }
 }
 
-async function logout() {
+async function handleLogout() {
     try {
-        await api("/logout", { method: "POST" });
+        await apiRequest("/logout", { method: "POST" });
     } catch (error) {
-        console.error(error);
+        console.error("Logout error:", error);
     }
 
     state.user = null;
@@ -286,280 +398,265 @@ async function logout() {
     state.suppliers = [];
     state.transactions = [];
     state.lowStock = [];
+    state.pendingUsers = [];
 
-    showAuthPage("landingPage");
+    if (state.chart) {
+        state.chart.destroy();
+        state.chart = null;
+    }
+
+    showLanding();
 }
 
-async function loadDashboard() {
+async function checkSession() {
     try {
-        const results = await Promise.all([
-            api("/products"),
-            api("/suppliers"),
-            api("/transactions"),
-            api("/low-stock")
-        ]);
+        const data = await apiRequest("/me");
+        state.user = data.user || data;
 
-        state.products = Array.isArray(results[0])
-            ? results[0]
-            : results[0].products || [];
+        if (!state.user || !state.user.user_id) {
+            showLanding();
+            return;
+        }
 
-        state.suppliers = Array.isArray(results[1])
-            ? results[1]
-            : results[1].suppliers || [];
-
-        state.transactions = Array.isArray(results[2])
-            ? results[2]
-            : results[2].transactions || [];
-
-        state.lowStock = Array.isArray(results[3])
-            ? results[3]
-            : results[3].low_stock_products || [];
-
-        renderDashboard();
-        renderProducts();
-        renderSuppliers();
-        renderTransactions();
-        renderLowStock();
-        renderStockProductOptions();
-        renderMovementChart();
+        await enterDashboard();
     } catch (error) {
-        showToast(error.message, true);
+        showLanding();
     }
 }
 
-function getStock(product) {
-    return Number(
-        product.current_stock ??
-        product.stock ??
-        product.opening_stock ??
-        0
-    );
+async function enterDashboard() {
+    showAuthPage("appLayout");
+    applyRolePermissions();
+    bindDashboardEvents();
+    showPage("overview");
+
+    if ($("todayDate")) {
+        $("todayDate").textContent = new Date().toLocaleDateString("en-IN", {
+            day: "numeric",
+            month: "short",
+            year: "numeric"
+        });
+    }
+
+    await loadDashboardData();
 }
 
-function getProductValue(product) {
-    return getStock(product) * Number(product.unit_cost || 0);
+/* DASHBOARD EVENTS */
+
+function bindDashboardEvents() {
+    if (state.eventsBound) return;
+    state.eventsBound = true;
+
+    document.querySelectorAll(".nav-link[data-page]").forEach((element) => {
+        element.addEventListener("click", () => {
+            showPage(element.dataset.page);
+        });
+    });
+
+    document.querySelectorAll("[data-go-page]").forEach((element) => {
+        element.addEventListener("click", () => {
+            showPage(element.dataset.goPage);
+        });
+    });
+
+    $("refreshDataBtn")?.addEventListener("click", loadDashboardData);
+
+    $("headerAddProduct")?.addEventListener("click", () => {
+        if (isAdmin()) openProductModal();
+    });
+
+    $("addProductBtn")?.addEventListener("click", openProductModal);
+
+    $("addSupplierPageBtn")?.addEventListener("click", openSupplierModal);
+    $("addSupplierBtn")?.addEventListener("click", openSupplierModal);
+
+    $("closeProductModal")?.addEventListener("click", closeProductModal);
+    $("cancelProductModal")?.addEventListener("click", closeProductModal);
+
+    $("closeSupplierModal")?.addEventListener("click", closeSupplierModal);
+    $("cancelSupplierModal")?.addEventListener("click", closeSupplierModal);
+
+    $("productForm")?.addEventListener("submit", saveProduct);
+    $("supplierForm")?.addEventListener("submit", saveSupplier);
+
+    $("stockInForm")?.addEventListener("submit", handleStockIn);
+    $("stockOutForm")?.addEventListener("submit", handleStockOut);
+
+    $("productSearch")?.addEventListener("input", renderProducts);
+
+    $("stockInSupplier")?.addEventListener("change", updateSupplierDetails);
+
+    $("transactionsDownloadBtn")?.addEventListener("click", downloadTransactions);
+    $("downloadTransactionsBtn")?.addEventListener("click", downloadTransactions);
+
+    $("refreshChartsBtn")?.addEventListener("click", refreshCharts);
+
+    $("productsTable")?.addEventListener("click", handleProductTableClick);
+    $("pendingUsersTable")?.addEventListener("click", handlePendingUserClick);
+}
+
+/* DATA LOADING */
+
+async function loadDashboardData() {
+    try {
+        const results = await Promise.allSettled([
+            apiRequest("/products"),
+            apiRequest("/suppliers"),
+            apiRequest("/transactions"),
+            apiRequest("/low-stock")
+        ]);
+
+        if (results[0].status === "fulfilled") {
+            state.products = getArray(results[0].value, "products");
+        }
+
+        if (results[1].status === "fulfilled") {
+            state.suppliers = getArray(results[1].value, "suppliers");
+        }
+
+        if (results[2].status === "fulfilled") {
+            state.transactions = getArray(results[2].value, "transactions");
+        }
+
+        if (results[3].status === "fulfilled") {
+            state.lowStock = getArray(results[3].value, "low_stock_products");
+
+            if (!state.lowStock.length) {
+                state.lowStock = getArray(results[3].value, "products");
+            }
+        }
+
+        renderDashboard();
+
+        const failed = results.filter((result) => result.status === "rejected");
+
+        if (failed.length) {
+            console.error("Some dashboard data could not be loaded:", failed);
+            showToast("Some dashboard information could not be loaded.", "error");
+        }
+    } catch (error) {
+        showToast(error.message || "Unable to load dashboard.", "error");
+    }
 }
 
 function renderDashboard() {
+    renderStats();
+    renderProducts();
+    renderSuppliers();
+    renderTransactions();
+    renderLowStock();
+    renderStockDropdowns();
+    renderMovementChart();
+}
+
+function renderStats() {
+    const totalProducts = state.products.length;
+
     const totalUnits = state.products.reduce(
-        (sum, product) => sum + getStock(product), 0
+        (sum, product) => sum + getStock(product),
+        0
     );
 
-    const totalValue = state.products.reduce(
-        (sum, product) => sum + getProductValue(product), 0
+    const inventoryValue = state.products.reduce(
+        (sum, product) => sum + getProductValue(product),
+        0
     );
 
-    if ($("totalProducts")) $("totalProducts").textContent = state.products.length;
-    if ($("totalUnits")) $("totalUnits").textContent = totalUnits.toLocaleString("en-IN");
-    if ($("inventoryValue")) $("inventoryValue").textContent = money(totalValue);
-    if ($("lowStockCount")) $("lowStockCount").textContent = state.lowStock.length;
+    const lowStockCount = state.products.filter(isLowStock).length;
 
-    const recent = [...state.transactions].reverse().slice(0, 5);
-    const table = $("overviewTransactionsTable");
+    if ($("totalProducts")) $("totalProducts").textContent = number(totalProducts);
+    if ($("totalUnits")) $("totalUnits").textContent = number(totalUnits);
+    if ($("inventoryValue")) $("inventoryValue").textContent = money(inventoryValue);
+    if ($("lowStockCount")) $("lowStockCount").textContent = number(lowStockCount);
 
-    if (table) {
-        table.innerHTML = recent.length
-            ? recent.map(transaction => transactionRow(transaction)).join("")
-            : `<tr><td colspan="6">No transactions available.</td></tr>`;
-    }
-
-    const lowList = $("overviewLowStockList");
-
-    if (lowList) {
-        lowList.innerHTML = state.lowStock.length
-            ? state.lowStock.slice(0, 5).map(product => `
-                <div class="low-stock-item">
-                    <div>
-                        <strong>${escapeHTML(product.product_name)}</strong>
-                        <small>${escapeHTML(product.sku)}</small>
-                    </div>
-                    <span>${getStock(product)} left</span>
-                </div>
-            `).join("")
-            : `<p>No low-stock products.</p>`;
+    if ($("productCount")) {
+        $("productCount").textContent = `${totalProducts} products`;
     }
 }
+
+/* PRODUCTS */
 
 function renderProducts() {
     const table = $("productsTable");
     if (!table) return;
 
-    const search = $("productSearch")?.value.toLowerCase() || "";
+    const search = ($("productSearch")?.value || "").toLowerCase();
 
-    const products = state.products.filter(product =>
-        `${product.product_name} ${product.sku} ${product.category || ""}`
-            .toLowerCase().includes(search)
-    );
+    const filtered = state.products.filter((product) => {
+        const text = [
+            product.sku,
+            getProductName(product),
+            product.category
+        ].join(" ").toLowerCase();
 
-    if ($("productCount")) {
-        $("productCount").textContent = products.length;
-    }
+        return text.includes(search);
+    });
 
-    table.innerHTML = products.length
-        ? products.map(product => `
-            <tr>
-                <td>${escapeHTML(product.sku)}</td>
-                <td>${escapeHTML(product.product_name)}</td>
-                <td>${escapeHTML(product.category || "-")}</td>
-                <td>${getStock(product)}</td>
-                <td>${product.reorder_level ?? 0}</td>
-                <td>${money(product.unit_cost)}</td>
-                <td>
-                    ${isAdmin() ? `
-                        <button class="table-action" data-edit-product="${product.product_id}">Edit</button>
-                        <button class="table-action danger" data-delete-product="${product.product_id}">Delete</button>
-                    ` : `<span class="read-only-label">View only</span>`}
-                </td>
-            </tr>
-        `).join("")
-        : `<tr><td colspan="7">No products found.</td></tr>`;
-}
+    table.innerHTML = filtered.length
+        ? filtered.map((product) => {
+            const low = isLowStock(product);
 
-function renderSuppliers() {
-    const select = $("stockInSupplier");
-
-    if (select) {
-        select.innerHTML = `<option value="">Select supplier (optional)</option>` +
-            state.suppliers.map(supplier => `
-                <option value="${supplier.supplier_id}">
-                    ${escapeHTML(supplier.supplier_name)}
-                </option>
-            `).join("");
-    }
-
-    const table = $("suppliersTable");
-
-    if (table) {
-        table.innerHTML = state.suppliers.length
-            ? state.suppliers.map(supplier => `
+            return `
                 <tr>
-                    <td>${escapeHTML(supplier.supplier_name)}</td>
-                    <td>${escapeHTML(supplier.phone_number || "-")}</td>
-                    <td>${escapeHTML(supplier.email || "-")}</td>
+                    <td>${escapeHTML(product.sku)}</td>
+                    <td>${escapeHTML(getProductName(product))}</td>
+                    <td>${escapeHTML(product.category || "—")}</td>
+                    <td>${number(getStock(product))}</td>
+                    <td>${number(product.reorder_level)}</td>
+                    <td>${money(product.unit_cost)}</td>
+                    <td><span class="stock-status ${low ? "low" : ""}">
+                        ${low ? "Low Stock" : "In Stock"}
+                    </span></td>
+                    ${isAdmin() ? `
+                    <td>
+                        <button class="table-action" data-edit-product="${escapeHTML(getProductId(product))}">Edit</button>
+                        <button class="table-action delete" data-delete-product="${escapeHTML(getProductId(product))}">Delete</button>
+                    </td>` : ""}
                 </tr>
-            `).join("")
-            : `<tr><td colspan="3">No suppliers available.</td></tr>`;
+            `;
+        }).join("")
+        : `<tr><td colspan="8">No products found.</td></tr>`;
+}
+
+function handleProductTableClick(event) {
+    const editButton = event.target.closest("[data-edit-product]");
+    const deleteButton = event.target.closest("[data-delete-product]");
+
+    if (editButton) {
+        const product = state.products.find(
+            (item) => String(getProductId(item)) === editButton.dataset.editProduct
+        );
+
+        if (product) openProductModal(product);
     }
-}
 
-function transactionRow(transaction) {
-    const type = String(transaction.transaction_type || "").toUpperCase();
-
-    return `
-        <tr>
-            <td>${escapeHTML(transaction.transaction_date || transaction.created_at || "-")}</td>
-            <td>${escapeHTML(transaction.product_name || transaction.sku || "-")}</td>
-            <td><span class="status-pill ${type === "STOCK_IN" ? "positive" : "negative"}">${escapeHTML(type.replace("_", " "))}</span></td>
-            <td>${Number(transaction.quantity || 0)}</td>
-            <td>${escapeHTML(transaction.supplier_name || "-")}</td>
-            <td>${escapeHTML(transaction.notes || "-")}</td>
-        </tr>
-    `;
-}
-
-function renderTransactions() {
-    const table = $("transactionsTable");
-    if (!table) return;
-
-    table.innerHTML = state.transactions.length
-        ? [...state.transactions].reverse().map(transactionRow).join("")
-        : `<tr><td colspan="6">No transactions available.</td></tr>`;
-}
-
-function renderLowStock() {
-    const table = $("lowStockTable");
-    if (!table) return;
-
-    table.innerHTML = state.lowStock.length
-        ? state.lowStock.map(product => `
-            <tr>
-                <td>${escapeHTML(product.sku)}</td>
-                <td>${escapeHTML(product.product_name)}</td>
-                <td>${getStock(product)}</td>
-                <td>${product.reorder_level ?? 0}</td>
-                <td><span class="status-pill negative">Low stock</span></td>
-            </tr>
-        `).join("")
-        : `<tr><td colspan="5">All products are sufficiently stocked.</td></tr>`;
-}
-
-function renderStockProductOptions() {
-    ["stockInProduct", "stockOutProduct"].forEach(id => {
-        const select = $(id);
-        if (!select) return;
-
-        select.innerHTML = `<option value="">Select product</option>` +
-            state.products.map(product => `
-                <option value="${escapeHTML(product.sku)}">
-                    ${escapeHTML(product.product_name)} (${escapeHTML(product.sku)})
-                </option>
-            `).join("");
-    });
-}
-
-function renderMovementChart() {
-    const canvas = $("movementChart");
-    if (!canvas || typeof Chart === "undefined") return;
-
-    const labels = state.transactions.slice(-7).map(item =>
-        item.transaction_date || item.created_at || ""
-    );
-
-    const stockIn = state.transactions.slice(-7).map(item =>
-        String(item.transaction_type).toUpperCase() === "STOCK_IN"
-            ? Number(item.quantity)
-            : 0
-    );
-
-    const stockOut = state.transactions.slice(-7).map(item =>
-        String(item.transaction_type).toUpperCase() === "STOCK_OUT"
-            ? Number(item.quantity)
-            : 0
-    );
-
-    if (state.chart) state.chart.destroy();
-
-    state.chart = new Chart(canvas, {
-        type: "bar",
-        data: {
-            labels,
-            datasets: [
-                { label: "Stock In", data: stockIn },
-                { label: "Stock Out", data: stockOut }
-            ]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                legend: { position: "bottom" }
-            }
-        }
-    });
-}
-
-function loadAnalysisImages() {
-    document.querySelectorAll(".analysis-chart").forEach(image => {
-        const original = image.dataset.src || image.getAttribute("src");
-        if (original) {
-            image.src = original + (original.includes("?") ? "&" : "?") + "t=" + Date.now();
-        }
-    });
+    if (deleteButton) {
+        deleteProduct(deleteButton.dataset.deleteProduct);
+    }
 }
 
 function openProductModal(product = null) {
     if (!isAdmin()) return;
 
     $("productForm")?.reset();
-    $("productModalTitle").textContent = product ? "Edit Product" : "Add Product";
+    clearMessage("productFormMessage");
 
-    $("editProductId").value = product?.product_id || "";
-    $("productSku").value = product?.sku || "";
-    $("productName").value = product?.product_name || "";
-    $("productCategory").value = product?.category || "";
-    $("productOpeningStock").value = product?.opening_stock ?? "";
-    $("productReorderLevel").value = product?.reorder_level ?? 10;
-    $("productUnitCost").value = product?.unit_cost ?? "";
+    if ($("editProductId")) {
+        $("editProductId").value = product ? getProductId(product) : "";
+    }
+
+    if ($("productModalTitle")) {
+        $("productModalTitle").textContent = product ? "Edit Product" : "Add Product";
+    }
+
+    if (product) {
+        $("productSku").value = product.sku || "";
+        $("productName").value = getProductName(product);
+        $("productCategory").value = product.category || "";
+        $("productOpeningStock").value = product.opening_stock ?? 0;
+        $("productReorderLevel").value = product.reorder_level ?? 10;
+        $("productUnitCost").value = product.unit_cost ?? 0;
+    }
 
     $("productModal")?.classList.remove("hidden");
 }
@@ -570,9 +667,10 @@ function closeProductModal() {
 
 async function saveProduct(event) {
     event.preventDefault();
+
     if (!isAdmin()) return;
 
-    const id = $("editProductId").value;
+    const productId = $("editProductId")?.value;
 
     const product = {
         sku: $("productSku").value.trim(),
@@ -583,35 +681,136 @@ async function saveProduct(event) {
         unit_cost: Number($("productUnitCost").value)
     };
 
+    if (!product.sku || !product.product_name) {
+        showMessage("productFormMessage", "SKU and product name are required.");
+        return;
+    }
+
+    if (Object.values(product).some((value) => value === "" || Number.isNaN(value))) {
+        showMessage("productFormMessage", "Enter valid product details.");
+        return;
+    }
+
+    const button = $("saveProductBtn");
+    if (button) button.disabled = true;
+
     try {
-        await api(id ? `/products/${id}` : "/products", {
-            method: id ? "PUT" : "POST",
+        await apiRequest(productId ? `/products/${productId}` : "/products", {
+            method: productId ? "PUT" : "POST",
             body: JSON.stringify(product)
         });
 
         closeProductModal();
-        showToast(id ? "Product updated successfully." : "Product added successfully.");
-        await loadDashboard();
+        await loadDashboardData();
+        showToast(productId ? "Product updated successfully." : "Product added successfully.");
     } catch (error) {
-        showMessage("productFormMessage", error.message, true);
+        showMessage("productFormMessage", error.message || "Unable to save product.");
+    } finally {
+        if (button) button.disabled = false;
     }
 }
 
-async function deleteProduct(id) {
-    if (!isAdmin() || !confirm("Are you sure you want to delete this product?")) return;
+async function deleteProduct(productId) {
+    if (!isAdmin()) return;
+
+    if (!confirm("Are you sure you want to delete this product?")) return;
 
     try {
-        await api(`/products/${id}`, { method: "DELETE" });
+        await apiRequest(`/products/${productId}`, { method: "DELETE" });
+        await loadDashboardData();
         showToast("Product deleted successfully.");
-        await loadDashboard();
     } catch (error) {
-        showToast(error.message, true);
+        showToast(error.message || "Unable to delete product.", "error");
+    }
+}
+
+/* SUPPLIERS */
+
+function getSupplierId(supplier) {
+    return supplier.supplier_id ?? supplier.id;
+}
+
+function getSupplierName(supplier) {
+    return supplier.supplier_name ?? supplier.name ?? "Unnamed supplier";
+}
+
+function renderSuppliers() {
+    const table = $("suppliersTable");
+    if (!table) return;
+
+    table.innerHTML = state.suppliers.length
+        ? state.suppliers.map((supplier) => `
+            <tr>
+                <td>${escapeHTML(getSupplierName(supplier))}</td>
+                <td>${escapeHTML(supplier.phone_number || supplier.phone || "—")}</td>
+                <td>${escapeHTML(supplier.email || "—")}</td>
+            </tr>
+        `).join("")
+        : `<tr><td colspan="3">No suppliers added yet.</td></tr>`;
+}
+
+function renderStockDropdowns() {
+    const productOptions = `
+        <option value="">Select product</option>
+        ${state.products.map((product) => `
+            <option value="${escapeHTML(product.sku)}">
+                ${escapeHTML(getProductName(product))} (${escapeHTML(product.sku)})
+            </option>
+        `).join("")}
+    `;
+
+    ["stockInProduct", "stockOutProduct"].forEach((id) => {
+        const select = $(id);
+        if (!select) return;
+
+        const selected = select.value;
+        select.innerHTML = productOptions;
+
+        if (state.products.some((product) => product.sku === selected)) {
+            select.value = selected;
+        }
+    });
+
+    const supplierSelect = $("stockInSupplier");
+
+    if (supplierSelect) {
+        const selected = supplierSelect.value;
+
+        supplierSelect.innerHTML = `
+            <option value="">Select supplier</option>
+            ${state.suppliers.map((supplier) => `
+                <option value="${escapeHTML(getSupplierId(supplier))}">
+                    ${escapeHTML(getSupplierName(supplier))}
+                </option>
+            `).join("")}
+        `;
+
+        if (state.suppliers.some((supplier) => String(getSupplierId(supplier)) === selected)) {
+            supplierSelect.value = selected;
+        }
+
+        updateSupplierDetails();
+    }
+}
+
+function updateSupplierDetails() {
+    const supplierId = $("stockInSupplier")?.value;
+    const supplier = state.suppliers.find(
+        (item) => String(getSupplierId(item)) === String(supplierId)
+    );
+
+    if ($("supplierDetails")) {
+        $("supplierDetails").textContent = supplier
+            ? `${supplier.phone_number || supplier.phone || "No phone"} · ${supplier.email || "No email"}`
+            : "";
     }
 }
 
 function openSupplierModal() {
     if (!isAdmin()) return;
+
     $("supplierForm")?.reset();
+    clearMessage("supplierFormMessage");
     $("supplierModal")?.classList.remove("hidden");
 }
 
@@ -621,6 +820,7 @@ function closeSupplierModal() {
 
 async function saveSupplier(event) {
     event.preventDefault();
+
     if (!isAdmin()) return;
 
     const supplier = {
@@ -629,110 +829,151 @@ async function saveSupplier(event) {
         email: $("supplierEmail").value.trim()
     };
 
+    if (!supplier.supplier_name) {
+        showMessage("supplierFormMessage", "Supplier name is required.");
+        return;
+    }
+
+    const button = $("saveSupplierBtn");
+    if (button) button.disabled = true;
+
     try {
-        await api("/suppliers", {
+        await apiRequest("/suppliers", {
             method: "POST",
             body: JSON.stringify(supplier)
         });
 
         closeSupplierModal();
+        await loadDashboardData();
         showToast("Supplier added successfully.");
-        const data = await api("/suppliers");
-        state.suppliers = Array.isArray(data) ? data : data.suppliers || [];
-        renderSuppliers();
     } catch (error) {
-        showMessage("supplierFormMessage", error.message, true);
+        showMessage("supplierFormMessage", error.message || "Unable to add supplier.");
+    } finally {
+        if (button) button.disabled = false;
     }
 }
 
-async function submitStock(event, type) {
+/* STOCK IN AND STOCK OUT */
+
+async function handleStockIn(event) {
     event.preventDefault();
+
     if (!isAdmin()) return;
 
-    const isIn = type === "stock-in";
-    const product = $(isIn ? "stockInProduct" : "stockOutProduct").value;
-    const quantity = Number($(isIn ? "stockInQuantity" : "stockOutQuantity").value);
-    const notes = $(isIn ? "stockInNotes" : "stockOutNotes")?.value.trim() || "";
+    const sku = $("stockInProduct")?.value;
+    const quantity = Number($("stockInQuantity")?.value);
+    const supplierId = $("stockInSupplier")?.value;
+    const notes = $("stockInNotes")?.value.trim() || "";
 
-    if (!product || quantity <= 0) {
-        showMessage(isIn ? "stockInMessage" : "stockOutMessage", "Select a product and enter a valid quantity.", true);
+    if (!sku || !Number.isInteger(quantity) || quantity <= 0) {
+        showMessage("stockInMessage", "Select a product and enter a valid quantity.");
         return;
     }
 
-    const payload = { sku: product, quantity, notes };
-
-    if (isIn) {
-        const supplierId = $("stockInSupplier")?.value;
-        if (supplierId) payload.supplier_id = Number(supplierId);
+    if (!supplierId) {
+        showMessage("stockInMessage", "Please select a supplier.");
+        return;
     }
 
     try {
-        await api(isIn ? "/stock-in" : "/stock-out", {
+        await apiRequest("/stock-in", {
             method: "POST",
-            body: JSON.stringify(payload)
+            body: JSON.stringify({
+                sku,
+                quantity,
+                supplier_id: Number(supplierId),
+                notes
+            })
         });
 
-        $(isIn ? "stockInForm" : "stockOutForm")?.reset();
-        showMessage(
-            isIn ? "stockInMessage" : "stockOutMessage",
-            isIn ? "Stock added successfully." : "Stock removed successfully."
-        );
+        $("stockInForm")?.reset();
+        clearMessage("stockInMessage");
 
-        await loadDashboard();
+        await loadDashboardData();
+        showToast("Stock added successfully.");
     } catch (error) {
-        showMessage(isIn ? "stockInMessage" : "stockOutMessage", error.message, true);
+        showMessage("stockInMessage", error.message || "Unable to record stock in.");
     }
 }
 
-async function loadPendingUsers() {
+async function handleStockOut(event) {
+    event.preventDefault();
+
     if (!isAdmin()) return;
 
+    const sku = $("stockOutProduct")?.value;
+    const quantity = Number($("stockOutQuantity")?.value);
+    const notes = $("stockOutNotes")?.value.trim() || "";
+
+    if (!sku || !Number.isInteger(quantity) || quantity <= 0) {
+        showMessage("stockOutMessage", "Select a product and enter a valid quantity.");
+        return;
+    }
+
     try {
-        const data = await api("/admin/pending-users");
-        state.pendingUsers = Array.isArray(data)
-            ? data
-            : data.users || data.pending_users || [];
+        await apiRequest("/stock-out", {
+            method: "POST",
+            body: JSON.stringify({ sku, quantity, notes })
+        });
 
-        const table = $("pendingUsersTable");
-        if (!table) return;
+        $("stockOutForm")?.reset();
+        clearMessage("stockOutMessage");
 
-        table.innerHTML = state.pendingUsers.length
-            ? state.pendingUsers.map(user => `
+        await loadDashboardData();
+        showToast("Stock removed successfully.");
+    } catch (error) {
+        showMessage("stockOutMessage", error.message || "Unable to record stock out.");
+    }
+}
+
+/* TRANSACTIONS */
+
+function renderTransactions() {
+    const table = $("transactionsTable");
+    if (!table) return;
+
+    const rows = state.transactions.slice().reverse();
+
+    table.innerHTML = rows.length
+        ? rows.map((transaction) => {
+            const type = getTransactionType(transaction);
+            const stockIn = type === "STOCK_IN";
+
+            return `
                 <tr>
-                    <td>${escapeHTML(user.full_name)}</td>
-                    <td>${escapeHTML(user.username)}</td>
-                    <td>${escapeHTML(user.email)}</td>
-                    <td>
-                        <button class="table-action" data-approve-user="${user.user_id}">Approve</button>
-                        <button class="table-action danger" data-reject-user="${user.user_id}">Reject</button>
-                    </td>
+                    <td>${escapeHTML(getTransactionDate(transaction))}</td>
+                    <td>${escapeHTML(transaction.sku || "—")}</td>
+                    <td>${escapeHTML(transaction.product_name || transaction.name || "—")}</td>
+                    <td><span class="stock-status ${stockIn ? "" : "low"}">
+                        ${escapeHTML(type || "—")}
+                    </span></td>
+                    <td>${number(transaction.quantity)}</td>
+                    <td>${escapeHTML(transaction.supplier_name || "—")}</td>
+                    <td>${escapeHTML(transaction.notes || "—")}</td>
+                </tr>
+            `;
+        }).join("")
+        : `<tr><td colspan="7">No transactions found.</td></tr>`;
+
+    const overviewTable = $("overviewTransactionsTable");
+
+    if (overviewTable) {
+        overviewTable.innerHTML = rows.slice(0, 5).length
+            ? rows.slice(0, 5).map((transaction) => `
+                <tr>
+                    <td>${escapeHTML(transaction.product_name || transaction.name || transaction.sku || "—")}</td>
+                    <td>${escapeHTML(getTransactionType(transaction))}</td>
+                    <td>${number(transaction.quantity)}</td>
+                    <td>${escapeHTML(getTransactionDate(transaction))}</td>
                 </tr>
             `).join("")
-            : `<tr><td colspan="4">No pending account requests.</td></tr>`;
-    } catch (error) {
-        showToast(error.message, true);
-    }
-}
-
-async function updateUserApproval(id, status) {
-    if (!isAdmin()) return;
-
-    try {
-        await api(`/admin/users/${id}/approval`, {
-            method: "PUT",
-            body: JSON.stringify({ approval_status: status })
-        });
-
-        showToast(`User ${status.toLowerCase()} successfully.`);
-        await loadPendingUsers();
-    } catch (error) {
-        showToast(error.message, true);
+            : `<tr><td colspan="4">No recent transactions.</td></tr>`;
     }
 }
 
 async function downloadTransactions() {
     try {
-        const response = await fetch(API_BASE + "/transactions/download", {
+        const response = await fetch("/transactions/download", {
             credentials: "include"
         });
 
@@ -745,96 +986,235 @@ async function downloadTransactions() {
         const link = document.createElement("a");
 
         link.href = url;
-        link.download = "inventory_transactions.csv";
+        link.download = "stock_transactions.csv";
+        document.body.appendChild(link);
         link.click();
+        link.remove();
 
         URL.revokeObjectURL(url);
     } catch (error) {
-        showToast(error.message, true);
+        showToast(error.message || "Download failed.", "error");
     }
+}
+
+/* LOW STOCK */
+
+function renderLowStock() {
+    const lowProducts = state.products.filter(isLowStock);
+
+    const table = $("lowStockTable");
+
+    if (table) {
+        table.innerHTML = lowProducts.length
+            ? lowProducts.map((product) => `
+                <tr>
+                    <td>${escapeHTML(product.sku)}</td>
+                    <td>${escapeHTML(getProductName(product))}</td>
+                    <td>${number(getStock(product))}</td>
+                    <td>${number(product.reorder_level)}</td>
+                    <td><span class="stock-status low">Low Stock</span></td>
+                </tr>
+            `).join("")
+            : `<tr><td colspan="5">No low-stock products. Everything looks good!</td></tr>`;
+    }
+
+    const overview = $("overviewLowStockList");
+
+    if (overview) {
+        overview.innerHTML = lowProducts.length
+            ? lowProducts.slice(0, 5).map((product) => `
+                <div class="low-stock-item">
+                    <div>
+                        <strong>${escapeHTML(getProductName(product))}</strong>
+                        <small>${escapeHTML(product.sku)}</small>
+                    </div>
+                    <span>${number(getStock(product))} left</span>
+                </div>
+            `).join("")
+            : `<p>No low-stock products.</p>`;
+    }
+}
+
+/* CHART */
+
+function renderMovementChart() {
+    const canvas = $("movementChart");
+
+    if (!canvas || typeof Chart === "undefined") return;
+
+    const daily = {};
+
+    state.transactions.forEach((transaction) => {
+        const date = getTransactionDate(transaction);
+        if (date === "—") return;
+
+        if (!daily[date]) {
+            daily[date] = { stockIn: 0, stockOut: 0 };
+        }
+
+        const type = getTransactionType(transaction);
+        const quantity = Number(transaction.quantity) || 0;
+
+        if (type === "STOCK_IN") {
+            daily[date].stockIn += quantity;
+        } else if (type === "STOCK_OUT") {
+            daily[date].stockOut += quantity;
+        }
+    });
+
+    const labels = Object.keys(daily).slice(-7);
+
+    if (state.chart) {
+        state.chart.destroy();
+    }
+
+    state.chart = new Chart(canvas, {
+        type: "bar",
+        data: {
+            labels,
+            datasets: [
+                {
+                    label: "Stock In",
+                    data: labels.map((date) => daily[date].stockIn),
+                    backgroundColor: "#78967d",
+                    borderRadius: 5
+                },
+                {
+                    label: "Stock Out",
+                    data: labels.map((date) => daily[date].stockOut),
+                    backgroundColor: "#c8d6c4",
+                    borderRadius: 5
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    position: "bottom",
+                    labels: {
+                        usePointStyle: true,
+                        boxWidth: 7,
+                        font: { size: 10 }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    grid: { display: false },
+                    ticks: { font: { size: 10 } }
+                },
+                y: {
+                    beginAtZero: true,
+                    ticks: { precision: 0, font: { size: 10 } }
+                }
+            }
+        }
+    });
+}
+
+/* CHART IMAGES */
+
+function loadAnalysisImages() {
+    document.querySelectorAll(".analysis-chart[data-src]").forEach((image) => {
+        const source = image.dataset.src;
+
+        if (source) {
+            image.src = `${source}?t=${Date.now()}`;
+        }
+    });
 }
 
 async function refreshCharts() {
     if (!isAdmin()) return;
 
+    const button = $("refreshChartsBtn");
+    if (button) button.disabled = true;
+
     try {
-        await api("/refresh-charts", { method: "POST" });
+        await apiRequest("/refresh-charts", { method: "POST" });
         loadAnalysisImages();
-        showToast("Charts refreshed successfully.");
+        showToast("Analysis charts refreshed.");
     } catch (error) {
-        showToast(error.message, true);
+        showToast(error.message || "Unable to refresh charts.", "error");
+    } finally {
+        if (button) button.disabled = false;
     }
 }
 
-function bindDashboardEvents() {
-    document.querySelectorAll(".nav-link").forEach(link => {
-        link.onclick = event => {
-            event.preventDefault();
-            showPage(link.dataset.page);
-        };
-    });
+/* USER MANAGEMENT */
 
-    $("headerAddProduct")?.addEventListener("click", () => openProductModal());
-    $("addProductBtn")?.addEventListener("click", () => openProductModal());
+async function loadPendingUsers() {
+    if (!isAdmin()) return;
 
-    $("closeProductModal")?.addEventListener("click", closeProductModal);
-    $("cancelProductModal")?.addEventListener("click", closeProductModal);
-    $("productForm")?.addEventListener("submit", saveProduct);
-
-    $("addSupplierBtn")?.addEventListener("click", openSupplierModal);
-    $("closeSupplierModal")?.addEventListener("click", closeSupplierModal);
-    $("cancelSupplierModal")?.addEventListener("click", closeSupplierModal);
-    $("supplierForm")?.addEventListener("submit", saveSupplier);
-
-    $("stockInForm")?.addEventListener("submit", event => submitStock(event, "stock-in"));
-    $("stockOutForm")?.addEventListener("submit", event => submitStock(event, "stock-out"));
-
-    $("productSearch")?.addEventListener("input", renderProducts);
-    $("refreshDataBtn")?.addEventListener("click", loadDashboard);
-    $("refreshChartsBtn")?.addEventListener("click", refreshCharts);
-
-    $("downloadTransactionsBtn")?.addEventListener("click", downloadTransactions);
-    $("exportTransactionsBtn")?.addEventListener("click", downloadTransactions);
-
-    $("logoutBtn")?.addEventListener("click", logout);
-
-    $("productsTable")?.addEventListener("click", event => {
-        const editButton = event.target.closest("[data-edit-product]");
-        const deleteButton = event.target.closest("[data-delete-product]");
-
-        if (editButton && isAdmin()) {
-            const product = state.products.find(item =>
-                String(item.product_id) === editButton.dataset.editProduct
-            );
-            if (product) openProductModal(product);
-        }
-
-        if (deleteButton && isAdmin()) {
-            deleteProduct(deleteButton.dataset.deleteProduct);
-        }
-    });
-
-    $("pendingUsersTable")?.addEventListener("click", event => {
-        const approve = event.target.closest("[data-approve-user]");
-        const reject = event.target.closest("[data-reject-user]");
-
-        if (approve) updateUserApproval(approve.dataset.approveUser, "APPROVED");
-        if (reject) updateUserApproval(reject.dataset.rejectUser, "REJECTED");
-    });
+    try {
+        const data = await apiRequest("/admin/pending-users");
+        state.pendingUsers = getArray(data, "users");
+        renderPendingUsers();
+    } catch (error) {
+        console.error("Pending users:", error);
+        showToast(error.message || "Unable to load pending users.", "error");
+    }
 }
 
-function bindAuthEvents() {
-    $("loginForm")?.addEventListener("submit", login);
-    $("signupForm")?.addEventListener("submit", signup);
+function renderPendingUsers() {
+    const table = $("pendingUsersTable");
+    if (!table) return;
 
-    $("showLoginBtn")?.addEventListener("click", () => showAuthPage("loginPage"));
-    $("showSignupBtn")?.addEventListener("click", () => showAuthPage("signupPage"));
-    $("backToLanding")?.addEventListener("click", () => showAuthPage("landingPage"));
-    $("backToLandingSignup")?.addEventListener("click", () => showAuthPage("landingPage"));
+    if ($("pendingCount")) {
+        $("pendingCount").textContent = number(state.pendingUsers.length);
+    }
 
-    $("landingLoginBtn")?.addEventListener("click", () => showAuthPage("loginPage"));
-    $("landingSignupBtn")?.addEventListener("click", () => showAuthPage("signupPage"));
+    if ($("pendingUsersLabel")) {
+        $("pendingUsersLabel").textContent =
+            `${state.pendingUsers.length} pending approval`;
+    }
+
+    table.innerHTML = state.pendingUsers.length
+        ? state.pendingUsers.map((user) => `
+            <tr>
+                <td>${escapeHTML(user.full_name || "—")}</td>
+                <td>${escapeHTML(user.username || "—")}</td>
+                <td>${escapeHTML(user.email || "—")}</td>
+                <td>${escapeHTML(user.created_at ? getTransactionDate({ created_at: user.created_at }) : "—")}</td>
+                <td>
+                    <button class="table-action" data-approve-user="${escapeHTML(user.user_id)}">Approve</button>
+                    <button class="table-action delete" data-reject-user="${escapeHTML(user.user_id)}">Reject</button>
+                </td>
+            </tr>
+        `).join("")
+        : `<tr><td colspan="5">No pending users.</td></tr>`;
 }
+
+async function handlePendingUserClick(event) {
+    const approveButton = event.target.closest("[data-approve-user]");
+    const rejectButton = event.target.closest("[data-reject-user]");
+
+    if (!approveButton && !rejectButton) return;
+
+    const button = approveButton || rejectButton;
+    const userId = button.dataset.approveUser || button.dataset.rejectUser;
+    const status = approveButton ? "APPROVED" : "REJECTED";
+
+    if (!confirm(`Are you sure you want to ${status.toLowerCase()} this user?`)) {
+        return;
+    }
+
+    try {
+        await apiRequest(`/admin/users/${userId}/approval`, {
+            method: "PUT",
+            body: JSON.stringify({ approval_status: status })
+        });
+
+        await loadPendingUsers();
+        showToast(`User ${status.toLowerCase()} successfully.`);
+    } catch (error) {
+        showToast(error.message || "Unable to update user.", "error");
+    }
+}
+
+/* INITIALIZATION */
 
 document.addEventListener("DOMContentLoaded", () => {
     bindAuthEvents();
