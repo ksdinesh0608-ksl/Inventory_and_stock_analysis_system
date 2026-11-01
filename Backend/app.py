@@ -58,7 +58,7 @@ BASE_DIR = os.path.abspath(
 )
 
 FRONTEND_FOLDER = os.path.join(BASE_DIR, "Frontend")
-ANALYSIS_FOLDER = BASE_DIR
+ANALYSIS_FOLDER = os.path.join(BASE_DIR, "Analysis")
 
 ANALYSIS_SCRIPT = os.path.join(
     ANALYSIS_FOLDER,
