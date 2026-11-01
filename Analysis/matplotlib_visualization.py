@@ -11,8 +11,10 @@ import matplotlib.pyplot as plt
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_DIR = CURRENT_DIR
 
-if CURRENT_DIR not in sys.path:
-    sys.path.insert(0, CURRENT_DIR)
+BASE_DIR = os.path.dirname(CURRENT_DIR)
+
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
 
 from Backend.db_connection import get_db_connection
 
