@@ -1,82 +1,210 @@
-# Inventory and Stock Analysis System
+# Stockwise – Inventory and Stock Analysis System
 
-A Python-based inventory management and analysis system that tracks stock movements, monitors inventory levels, identifies low-stock products, and generates useful reports to support better inventory decisions.
+A web-based inventory management system developed to simplify product management, track stock movements, monitor low-stock items, and analyse inventory data.
 
-## About the Project
+The application provides a centralised dashboard where administrators and staff can manage inventory operations and view useful reports.
 
-Managing inventory manually can make it difficult to track available stock, monitor incoming and outgoing products, and identify items that need restocking.
+---
 
-The **Inventory and Stock Analysis System** aims to simplify these tasks by maintaining product records, recording stock transactions, calculating current stock levels, and analyzing inventory data.
+## Project Overview
 
-The project combines Python, Flask, MySQL, Pandas, NumPy, and Matplotlib to build a backend-focused inventory management and reporting application.
+Stockwise helps shopkeepers and inventory teams maintain accurate stock records and make better inventory decisions.
 
-## Project Objectives
+The system combines a web-based frontend, a Python Flask backend, a MySQL database, and data analysis tools.
 
-- Manage product and supplier information.
+### Main Objectives
+
+- Manage products and their details.
 - Record stock-in and stock-out transactions.
-- Calculate current stock based on opening stock and recorded movements.
-- Identify products that have reached or fallen below their reorder levels.
-- Analyze product movement and inventory trends.
-- Estimate the value of available inventory.
-- Generate reports and charts for easier interpretation of inventory data.
+- Maintain supplier information.
+- Monitor current stock levels.
+- Identify products that need restocking.
+- Analyse inventory movement and valuation.
+- Provide role-based access to the application.
+
+---
+
+## Features
+
+### 1. User Authentication and Management
+
+- User registration and login.
+- Admin and staff roles.
+- New staff accounts require administrator approval.
+- Admin can view pending registration requests.
+- Admin can approve or reject staff accounts.
+- Approved staff members can access the application according to their role.
+- Session-based authentication.
+
+### 2. Dashboard
+
+- Overview of inventory information.
+- Total products.
+- Current stock information.
+- Inventory valuation.
+- Low-stock product count.
+- Quick access to important inventory operations.
+
+### 3. Product Management
+
+- Add new products.
+- View all available products.
+- Edit existing product details.
+- Delete products where permitted.
+- Maintain SKU, product name, category, opening stock, reorder level, and unit cost.
+
+### 4. Supplier Management
+
+- Add new suppliers.
+- View supplier information.
+- Maintain supplier contact details.
+- Select existing suppliers while recording stock-in transactions.
+
+### 5. Stock Management
+
+**Stock In**
+- Record newly received stock.
+- Select an existing supplier.
+- Store transaction details and optional notes.
+
+**Stock Out**
+- Record stock issued or sold.
+- Validate available stock before processing.
+- Prevent stock from becoming negative.
+
+### 6. Transaction History
+
+- Maintain stock-in and stock-out records.
+- View transaction details.
+- Track transaction dates and quantities.
+- Download transaction records.
+
+### 7. Low-Stock Monitoring
+
+- Identify products below their reorder level.
+- Display current stock and reorder level.
+- Help users identify products that require attention.
+
+### 8. Inventory Analysis and Charts
+
+The system generates visual reports using Matplotlib.
+
+Available charts include:
+
+1. Low-stock products.
+2. Fast-moving products.
+3. Stock by category.
+4. Stock movement over time.
+5. Inventory value by product.
+
+These visualisations help users understand inventory conditions and make informed decisions.
+
+---
 
 ## Technologies Used
 
 | Technology | Purpose |
 |---|---|
-| Python | Application logic, validation, and calculations |
-| Flask | REST API development and request handling |
-| MySQL | Relational database and persistent storage |
-| Pandas | Data cleaning, filtering, grouping, and reporting |
-| NumPy | Numerical calculations and statistical analysis |
-| Matplotlib | Data visualization and chart generation |
-| Git and GitHub | Version control and team collaboration |
+| HTML5 | Webpage structure |
+| CSS3 | Styling and responsive layout |
+| JavaScript | Frontend interactions and API requests |
+| Python | Backend programming |
+| Flask | Web framework and REST API |
+| MySQL | Database management |
+| Pandas | Data processing and analysis |
+| NumPy | Numerical operations |
+| Matplotlib | Data visualisation |
+| Gunicorn | Production WSGI server |
+| Render | Application deployment |
+| Aiven | Hosted MySQL database |
 
-## Key Features
+---
 
-### 1. Product Management
-- Add new products with unique SKUs.
-- View existing product details.
-- Update product information.
-- Delete products when database constraints permit.
+## System Architecture
 
-### 2. Stock Movement Tracking
-- Record incoming stock using stock-in transactions.
-- Record outgoing stock using stock-out transactions.
-- Maintain transaction history.
-- Associate stock transactions with the relevant products.
+The application follows a three-layer architecture.
 
-### 3. Current Stock Calculation
+### 1. Frontend
+HTML, CSS and JavaScript provide the user interface, forms, dashboard, tables and visual reports.
 
-Current stock is calculated using the opening stock and recorded stock movements.
+### 2. Backend
+Python and Flask handle authentication, API requests, validation, inventory operations and database communication.
 
-**Formula:**
+### 3. Database
+MySQL stores user details, products, suppliers and stock transactions.
 
-Current Stock = Opening Stock + Total Stock In − Total Stock Out
+### Application Workflow
 
-### 4. Low-Stock Identification
+1. The user interacts with the frontend.
+2. JavaScript sends a request to the Flask backend.
+3. Flask processes the request and validates the information.
+4. The backend communicates with MySQL.
+5. MySQL stores or retrieves the required information.
+6. The frontend displays the updated result.
 
-Compare current stock against each product's configured reorder level to identify products that need attention.
+---
 
-### 5. Inventory Analysis
+## Database Design
 
-Use inventory and transaction data to prepare summaries, analyze product movements, identify fast-moving products, and estimate inventory value.
+The project uses a MySQL database named:
 
-### 6. Reports and Visualization
+`inventory_management`
 
-Generate inventory reports and visualizations, including stock comparisons and product movement trends.
+### Main Tables
 
-## System Workflow
+| Table | Description |
+|---|---|
+| users | Stores user information, roles and approval status |
+| products | Stores product details and inventory settings |
+| suppliers | Stores supplier information |
+| stock_transactions | Stores stock-in and stock-out records |
 
-1. Product and transaction data are stored in MySQL.
-2. Python backend functions retrieve and update inventory records.
-3. Flask API endpoints expose the available application operations.
-4. Pandas organizes and analyzes inventory and transaction data.
-5. NumPy supports numerical calculations and statistical analysis.
-6. Matplotlib generates charts from the analyzed data.
-7. Reports and API responses provide useful inventory information.
+### Database Views
 
-## Project Structure
+The database also uses views for inventory reporting:
+
+- `current_stock_report`
+- `daily_stock_movement_report`
+- `inventory_valuation_report`
+- `low_stock_report`
+- `stock_movement_report`
+
+### Important Inventory Calculations
+
+**Current Stock**
+
+Current Stock = Opening Stock + Stock In − Stock Out
+
+**Low Stock Condition**
+
+Current Stock < Reorder Level
+
+**Inventory Valuation**
+
+Inventory Value = Current Stock × Unit Cost
+
+Stock-out operations are validated to prevent issuing more quantity than is available.
+
+---
+
+## Data Analysis
+
+The project uses Python data analysis libraries to generate inventory reports.
+
+### Pandas
+Used for processing, filtering, grouping and summarising inventory data.
+
+### NumPy
+Used for numerical calculations and data operations.
+
+### Matplotlib
+Used to create visual charts for inventory analysis.
+
+The generated reports provide information about low-stock products, fast-moving items, category-wise stock, stock movement and inventory valuation.
+
+---
+
+## Project Folder Structure
 
 ```text
 Inventory_and_stock_analysis_system/
@@ -86,287 +214,135 @@ Inventory_and_stock_analysis_system/
 │   ├── db_connection.py
 │   └── inventory_logic.py
 │
-├── .env
-├── .gitignore
-├── README.md
-└── requirements.txt
+├── Frontend/
+│   ├── index.html
+│   ├── style.css
+│   └── script.js
+│
+├── Analysis/
+│   └── matplotlib_visualization.py
+│
+├── requirements.txt
+└── README.md
 ```
 
-The database SQL scripts may be maintained in a separate folder or at the repository root, depending on the current repository structure. Analysis modules can be added as they are implemented.
-
-**File responsibilities:**
-
-- `app.py` — Flask application and API routes.
-- `db_connection.py` — MySQL database connection.
-- `inventory_logic.py` — Product operations and stock transaction logic.
-- `.env` — Local database configuration; must not be committed.
-- `requirements.txt` — Python dependencies.
-- `README.md` — Project documentation.
-
-## Database Design
-
-The system uses a relational MySQL database.
-
-### Main Tables
-
-**Products**
-- Product ID
-- SKU
-- Product name
-- Category
-- Opening stock
-- Reorder level
-- Unit cost
-- Creation timestamp
-
-**Suppliers**
-- Supplier ID
-- Supplier name
-- Phone number
-- Email
-- Creation timestamp
-
-**Stock Transactions**
-- Transaction ID
-- Product ID
-- Transaction date
-- Transaction type
-- Quantity
-- Supplier ID, when applicable
-- Notes
-
-Primary keys, foreign keys, constraints, and appropriate data validation help maintain data integrity.
-
-### Database Views
-
-The database includes reporting views for information such as:
-
-- Current stock.
-- Low-stock products.
-- Daily stock movements.
-- Stock movement summaries.
-- Inventory valuation.
-
-## Flask REST API Endpoints
-
-The Flask application provides the following endpoints.
-
-| HTTP Method | Endpoint | Purpose |
-|---|---|---|
-| GET | `/` | Check application status |
-| GET | `/test-db` | Test database connectivity |
-| GET | `/products` | Retrieve all products |
-| POST | `/products` | Add a product |
-| PUT | `/products/<product_id>` | Update a product |
-| DELETE | `/products/<product_id>` | Delete a product when permitted |
-| POST | `/stock-in` | Record incoming stock |
-| POST | `/stock-out` | Record outgoing stock |
-| GET | `/low-stock` | Retrieve low-stock products |
-| GET | `/transactions` | Retrieve stock transaction history |
-
-### API Handling
-
-- Accepts JSON request data where required.
-- Validates input before processing requests.
-- Returns JSON responses.
-- Uses suitable HTTP status codes for success and error conditions.
-- Handles errors such as invalid input, duplicate SKUs, missing products, and insufficient stock.
-- Uses parameterized SQL queries for database operations.
-
-## Data Analysis and Visualization
-
-The project uses three Python libraries for inventory analysis.
-
-### Pandas
-- Organizes product and transaction records into tabular data.
-- Filters low-stock products.
-- Groups transactions by product.
-- Prepares inventory summaries and reports.
-
-### NumPy
-- Performs numerical calculations.
-- Calculates statistics such as averages, totals, and other useful measurements.
-- Supports quantitative analysis of inventory data.
-
-### Matplotlib
-- Creates bar charts for stock comparisons.
-- Visualizes product movement and inventory trends.
-- Generates charts with appropriate titles, labels, and legends.
-
-These analysis capabilities will be integrated with the existing backend as the relevant modules are completed.
+---
 
 ## Installation and Setup
 
 ### Prerequisites
 
-Install the following software:
+Install the following before running the project locally:
 
 - Python
-- MySQL Server
-- MySQL Workbench
+- MySQL
 - Git
-- Visual Studio Code (recommended)
+- A code editor such as Visual Studio Code
 
-### 1. Clone the Repository
+### Step 1: Clone the Repository
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/ksdinesh0608-ksl/Inventory_and_stock_analysis_system.git
+```
+
+### Step 2: Open the Project
+
+```bash
 cd Inventory_and_stock_analysis_system
 ```
 
-Replace `<repository-url>` with the actual GitHub repository URL.
-
-### 2. Create a Virtual Environment
+### Step 3: Create a Virtual Environment
 
 ```bash
 python -m venv .venv
 ```
 
-Activate it on Windows PowerShell:
-
-```powershell
-.\.venv\Scripts\Activate.ps1
-```
-
-### 3. Install Dependencies
-
-If `requirements.txt` is available:
+Activate it on Windows:
 
 ```bash
-python -m pip install -r requirements.txt
+.venv\Scripts\activate
 ```
 
-Otherwise, install the required packages:
+### Step 4: Install Dependencies
 
 ```bash
-python -m pip install flask mysql-connector-python python-dotenv pandas numpy matplotlib
+pip install -r requirements.txt
 ```
 
-### 4. Configure the Database
+### Step 5: Configure Database Credentials
 
-1. Start the MySQL server.
-2. Open MySQL Workbench and connect to the server.
-3. Execute the project's SQL scripts in the documented order.
-4. Run the database verification script.
-5. Confirm that the required tables, views, and triggers have been created.
-
-### 5. Configure Environment Variables
-
-Create a local `.env` file in the project root:
+Create a `.env` file in the project root and configure your MySQL connection:
 
 ```env
-DB_HOST=localhost
-DB_USER=your_mysql_username
-DB_PASSWORD=your_mysql_password
-DB_NAME=your_database_name
+DB_HOST=your_database_host
+DB_USER=your_database_username
+DB_PORT=3306
+DB_PASSWORD=your_database_password
+DB_NAME=inventory_management
 ```
 
-Replace the example values with your actual local database configuration. Do not commit credentials to GitHub.
+Use your own database credentials. Do not upload the `.env` file or expose database passwords on GitHub.
 
-### 6. Run the Application
+### Step 6: Run the Application
 
-From the project root, run:
+From the project root:
 
 ```bash
-python Backend/app.py
+cd Backend
+python app.py
 ```
 
-Use the host and port printed by Flask to access the running application.
+Open the local URL displayed in the terminal.
 
-### 7. Test the API
+---
 
-Use an API testing tool, such as Thunder Client or Postman, to send requests to the available endpoints.
+## Deployment
 
-For example, send a GET request to:
+The project is deployed using Render, with a hosted MySQL database on Aiven.
 
-```text
-http://127.0.0.1:5000/products
-```
+**Application URL:**
 
-The port shown in your terminal may differ if you configured another port.
+https://inventory-and-stock-analysis-system-coc4.onrender.com
 
-## Expected Outputs
+The backend uses Gunicorn as the production server.
 
-The system is designed to provide:
+Database credentials are configured through environment variables in the deployment environment.
 
-- Product and stock records.
-- Current stock reports.
-- Low-stock product lists.
-- Stock-in and stock-out transaction history.
-- Stock movement summaries.
-- Estimated inventory valuation.
-- Charts comparing stock levels and visualizing product movements.
-
-## Validation and Data Integrity
-
-The application incorporates validation and error handling to help ensure reliable inventory records.
-
-Examples include:
-
-- Preventing duplicate product SKUs.
-- Rejecting invalid or missing input.
-- Checking product availability before stock-out transactions.
-- Rejecting stock-out quantities that exceed available stock.
-- Respecting database relationships when deleting products.
-- Handling database errors without silently treating failed operations as successful.
-
-## Security and Configuration
-
-- Database credentials are stored in environment variables.
-- The `.env` file is excluded from version control.
-- SQL statements use parameters rather than directly inserting user input into query strings.
-- Database constraints help protect the integrity of stored records.
-
-## Project Scope
-
-The project focuses on inventory tracking, stock movement analysis, low-stock identification, and reporting.
-
-Reorder recommendations are based on configured stock thresholds. The system does not automatically place purchase orders with suppliers.
+---
 
 ## Future Enhancements
 
-- Add a dashboard for inventory summaries.
-- Provide date-range filters for stock movement analysis.
-- Generate downloadable inventory reports.
-- Add user authentication and role-based access.
-- Improve demand analysis and reorder recommendations.
-- Add automated alerts for low-stock products.
+Possible improvements include:
 
-## Live Deployment
+- Exporting inventory reports in PDF and Excel formats.
+- Adding advanced search and filtering.
+- Introducing barcode scanning.
+- Adding automated email notifications for low-stock products.
+- Improving analytics with additional inventory trends.
+- Adding more detailed user activity logs.
 
-The Inventory and Stock Analysis System is deployed and accessible online.
+---
 
-- **Live Website:** https://inventory-and-stock-analysis-system-coc4.onrender.com
-- **Backend:** Python, Flask, REST APIs
-- **Database:** MySQL hosted on Aiven
-- **Data Analysis:** Pandas, NumPy, Matplotlib
-- **Frontend:** HTML, CSS, JavaScript
+## Project Information
 
-### Features
+**Project Name:** Inventory and Stock Analysis System
 
-- Product and supplier management
-- Stock-in and stock-out transactions
-- Current stock tracking and low-stock alerts
-- Inventory valuation and stock movement analysis
-- Interactive inventory dashboard with analytical charts
+**Application Name:** Stockwise
 
-### Running Locally
+**Domain:** Inventory Management and Data Analysis
 
-1. Clone the GitHub repository.
-2. Create and activate a Python virtual environment.
-3. Install dependencies using `pip install -r requirements.txt`.
-4. Configure the required database environment variables.
-5. Start the Flask application using `python Backend/app.py`.
+**Backend:** Python Flask
 
-**Note:** The live application may take a little time to respond after inactivity because it uses a free hosting plan.
-## Team Collaboration
+**Database:** MySQL
 
-The project is developed collaboratively using Git and GitHub.
+**Frontend:** HTML, CSS and JavaScript
 
-Team members can work on separate modules, commit their changes, and integrate their work through the shared repository.
+**Academic Programme:** B.Tech – Computer Science and Engineering
+
+---
 
 ## Conclusion
 
-The Inventory and Stock Analysis System demonstrates how Python, Flask, MySQL, and data analysis libraries can work together to simplify inventory management.
+Stockwise provides a simple and organised way to manage inventory operations. It brings product management, supplier records, stock transactions, user management and data visualisation together in one application.
 
-By tracking stock movements, calculating current stock, identifying low-stock products, and preparing reports, the system aims to support more organized and informed inventory decisions.
+The project demonstrates how frontend technologies, backend development, database management and data analysis can be combined to build a practical inventory management solution.
