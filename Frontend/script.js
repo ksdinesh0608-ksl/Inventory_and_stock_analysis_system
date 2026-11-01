@@ -233,6 +233,13 @@ function showPage(page) {
     if (typeof loadPageData === "function") {
         loadPageData(page);
     }
+    if (page === "analysis") {
+        loadAnalysisImages();
+    }
+
+    if (page === "users") {
+        loadPendingUsers();
+    }
 }
 
 function bindNavigationEvents() {
