@@ -94,6 +94,8 @@ function clearMessage(elementId) {
     showMessage(elementId, "");
 }
 
+/* AUTHENTICATION PAGES */
+
 function showAuthPage(page) {
     [
         "landingPage",
@@ -138,6 +140,8 @@ function isAdmin() {
         .toUpperCase() === "ADMIN";
 }
 
+/* ROLE PERMISSIONS */
+
 function applyRolePermissions() {
     const admin = isAdmin();
 
@@ -169,7 +173,26 @@ function applyRolePermissions() {
     }
 }
 
+/* SIDEBAR NAVIGATION */
+
 function showPage(page) {
+    const allowedPages = [
+        "overview",
+        "products",
+        "suppliers",
+        "stock-in",
+        "stock-out",
+        "transactions",
+        "low-stock",
+        "analysis",
+        "users"
+    ];
+
+    if (!allowedPages.includes(page)) {
+        console.error("Unknown page:", page);
+        return;
+    }
+
     const adminPages = ["stock-in", "stock-out", "users"];
 
     if (adminPages.includes(page) && !isAdmin()) {
@@ -179,7 +202,11 @@ function showPage(page) {
 
     const section = $(`${page}Page`);
 
-    if (!section) return;
+    if (!section) {
+        console.error(`Page section not found: ${page}Page`);
+        showToast(`Page not found: ${page}`, "error");
+        return;
+    }
 
     document.querySelectorAll(".page-section").forEach((element) => {
         element.classList.remove("active");
@@ -217,6 +244,27 @@ function showPage(page) {
         loadPendingUsers();
     }
 }
+
+function bindNavigationEvents() {
+    document.addEventListener("click", (event) => {
+        const navLink = event.target.closest(".nav-link[data-page]");
+
+        if (navLink) {
+            event.preventDefault();
+            showPage(navLink.dataset.page);
+            return;
+        }
+
+        const pageButton = event.target.closest("[data-go-page]");
+
+        if (pageButton) {
+            event.preventDefault();
+            showPage(pageButton.dataset.goPage);
+        }
+    });
+}
+
+/* DATA HELPERS */
 
 function getStock(product) {
     return Number(
@@ -269,7 +317,7 @@ function getArray(data, key) {
     return [];
 }
 
-/* AUTHENTICATION */
+/* AUTHENTICATION EVENTS */
 
 function bindAuthEvents() {
     $("landingLogin")?.addEventListener("click", showLogin);
@@ -330,6 +378,7 @@ async function handleLogin(event) {
         }
 
         state.user = data.user || data;
+
         await enterDashboard();
     } catch (error) {
         showMessage("loginMessage", error.message || "Unable to login.");
@@ -413,7 +462,7 @@ async function checkSession() {
         const data = await apiRequest("/me");
         state.user = data.user || data;
 
-        if (!state.user || !state.user.user_id) {
+        if (!state.user || !(state.user.user_id || state.user.id || state.user.username)) {
             showLanding();
             return;
         }
@@ -424,8 +473,11 @@ async function checkSession() {
     }
 }
 
+/* ENTER DASHBOARD */
+
 async function enterDashboard() {
     showAuthPage("appLayout");
+
     applyRolePermissions();
     bindDashboardEvents();
     showPage("overview");
@@ -445,19 +497,10 @@ async function enterDashboard() {
 
 function bindDashboardEvents() {
     if (state.eventsBound) return;
+
     state.eventsBound = true;
 
-    document.querySelectorAll(".nav-link[data-page]").forEach((element) => {
-        element.addEventListener("click", () => {
-            showPage(element.dataset.page);
-        });
-    });
-
-    document.querySelectorAll("[data-go-page]").forEach((element) => {
-        element.addEventListener("click", () => {
-            showPage(element.dataset.goPage);
-        });
-    });
+    bindNavigationEvents();
 
     $("refreshDataBtn")?.addEventListener("click", loadDashboardData);
 
@@ -495,7 +538,7 @@ function bindDashboardEvents() {
     $("pendingUsersTable")?.addEventListener("click", handlePendingUserClick);
 }
 
-/* DATA LOADING */
+/* LOAD DASHBOARD DATA */
 
 async function loadDashboardData() {
     try {
@@ -548,6 +591,8 @@ function renderDashboard() {
     renderStockDropdowns();
     renderMovementChart();
 }
+
+/* DASHBOARD STATISTICS */
 
 function renderStats() {
     const totalProducts = state.products.length;
@@ -604,9 +649,11 @@ function renderProducts() {
                     <td>${number(getStock(product))}</td>
                     <td>${number(product.reorder_level)}</td>
                     <td>${money(product.unit_cost)}</td>
-                    <td><span class="stock-status ${low ? "low" : ""}">
-                        ${low ? "Low Stock" : "In Stock"}
-                    </span></td>
+                    <td>
+                        <span class="stock-status ${low ? "low" : ""}">
+                            ${low ? "Low Stock" : "In Stock"}
+                        </span>
+                    </td>
                     ${isAdmin() ? `
                     <td>
                         <button class="table-action" data-edit-product="${escapeHTML(getProductId(product))}">Edit</button>
@@ -702,6 +749,7 @@ async function saveProduct(event) {
 
         closeProductModal();
         await loadDashboardData();
+
         showToast(productId ? "Product updated successfully." : "Product added successfully.");
     } catch (error) {
         showMessage("productFormMessage", error.message || "Unable to save product.");
@@ -718,6 +766,7 @@ async function deleteProduct(productId) {
     try {
         await apiRequest(`/products/${productId}`, { method: "DELETE" });
         await loadDashboardData();
+
         showToast("Product deleted successfully.");
     } catch (error) {
         showToast(error.message || "Unable to delete product.", "error");
@@ -795,6 +844,7 @@ function renderStockDropdowns() {
 
 function updateSupplierDetails() {
     const supplierId = $("stockInSupplier")?.value;
+
     const supplier = state.suppliers.find(
         (item) => String(getSupplierId(item)) === String(supplierId)
     );
@@ -811,6 +861,7 @@ function openSupplierModal() {
 
     $("supplierForm")?.reset();
     clearMessage("supplierFormMessage");
+
     $("supplierModal")?.classList.remove("hidden");
 }
 
@@ -845,6 +896,7 @@ async function saveSupplier(event) {
 
         closeSupplierModal();
         await loadDashboardData();
+
         showToast("Supplier added successfully.");
     } catch (error) {
         showMessage("supplierFormMessage", error.message || "Unable to add supplier.");
@@ -853,7 +905,7 @@ async function saveSupplier(event) {
     }
 }
 
-/* STOCK IN AND STOCK OUT */
+/* STOCK IN */
 
 async function handleStockIn(event) {
     event.preventDefault();
@@ -890,11 +942,14 @@ async function handleStockIn(event) {
         clearMessage("stockInMessage");
 
         await loadDashboardData();
+
         showToast("Stock added successfully.");
     } catch (error) {
         showMessage("stockInMessage", error.message || "Unable to record stock in.");
     }
 }
+
+/* STOCK OUT */
 
 async function handleStockOut(event) {
     event.preventDefault();
@@ -920,6 +975,7 @@ async function handleStockOut(event) {
         clearMessage("stockOutMessage");
 
         await loadDashboardData();
+
         showToast("Stock removed successfully.");
     } catch (error) {
         showMessage("stockOutMessage", error.message || "Unable to record stock out.");
@@ -944,9 +1000,11 @@ function renderTransactions() {
                     <td>${escapeHTML(getTransactionDate(transaction))}</td>
                     <td>${escapeHTML(transaction.sku || "—")}</td>
                     <td>${escapeHTML(transaction.product_name || transaction.name || "—")}</td>
-                    <td><span class="stock-status ${stockIn ? "" : "low"}">
-                        ${escapeHTML(type || "—")}
-                    </span></td>
+                    <td>
+                        <span class="stock-status ${stockIn ? "" : "low"}">
+                            ${escapeHTML(type || "—")}
+                        </span>
+                    </td>
                     <td>${number(transaction.quantity)}</td>
                     <td>${escapeHTML(transaction.supplier_name || "—")}</td>
                     <td>${escapeHTML(transaction.notes || "—")}</td>
@@ -987,6 +1045,7 @@ async function downloadTransactions() {
 
         link.href = url;
         link.download = "stock_transactions.csv";
+
         document.body.appendChild(link);
         link.click();
         link.remove();
@@ -1035,7 +1094,7 @@ function renderLowStock() {
     }
 }
 
-/* CHART */
+/* MOVEMENT CHART */
 
 function renderMovementChart() {
     const canvas = $("movementChart");
@@ -1114,7 +1173,7 @@ function renderMovementChart() {
     });
 }
 
-/* CHART IMAGES */
+/* ANALYSIS CHART IMAGES */
 
 function loadAnalysisImages() {
     document.querySelectorAll(".analysis-chart[data-src]").forEach((image) => {
@@ -1134,7 +1193,9 @@ async function refreshCharts() {
 
     try {
         await apiRequest("/refresh-charts", { method: "POST" });
+
         loadAnalysisImages();
+
         showToast("Analysis charts refreshed.");
     } catch (error) {
         showToast(error.message || "Unable to refresh charts.", "error");
@@ -1150,7 +1211,9 @@ async function loadPendingUsers() {
 
     try {
         const data = await apiRequest("/admin/pending-users");
+
         state.pendingUsers = getArray(data, "users");
+
         renderPendingUsers();
     } catch (error) {
         console.error("Pending users:", error);
@@ -1208,6 +1271,7 @@ async function handlePendingUserClick(event) {
         });
 
         await loadPendingUsers();
+
         showToast(`User ${status.toLowerCase()} successfully.`);
     } catch (error) {
         showToast(error.message || "Unable to update user.", "error");
