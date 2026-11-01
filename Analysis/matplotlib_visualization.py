@@ -7,6 +7,7 @@ import matplotlib
 matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
+import matplotlib.ticker as mticker
 import pandas as pd
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -27,90 +28,140 @@ CHART_FILES = [
     "inventory_value_by_product.png"
 ]
 
+BG = "#f5f7f2"
+GREEN = "#49634d"
+DARK = "#304936"
+SAGE = "#91a78f"
+LIGHT_GREEN = "#c8d5c3"
+GOLD = "#c5a76b"
+GRID = "#e5eae1"
+TEXT = "#657267"
+
+plt.rcParams.update({
+    "figure.facecolor": BG,
+    "axes.facecolor": BG,
+    "axes.edgecolor": BG,
+    "axes.labelcolor": TEXT,
+    "axes.titlecolor": DARK,
+    "xtick.color": TEXT,
+    "ytick.color": TEXT,
+    "font.family": "DejaVu Sans",
+    "font.size": 9,
+    "axes.titlesize": 13,
+    "axes.titleweight": "bold",
+    "axes.labelsize": 9,
+    "savefig.facecolor": BG,
+    "savefig.edgecolor": BG
+})
+
 
 def fetch_data(query):
-    connection = None
+    connection = get_db_connection()
 
     try:
-        connection = get_db_connection()
         return pd.read_sql_query(query, connection)
     finally:
-        if connection is not None and connection.is_connected():
+        if connection.is_connected():
             connection.close()
 
 
-def save_chart(fig, filename):
-    path = os.path.join(OUTPUT_DIR, filename)
+def style_axis(ax, horizontal=False):
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["left"].set_visible(False)
+    ax.spines["bottom"].set_color(GRID)
 
-    fig.tight_layout()
-    fig.savefig(path, dpi=130, bbox_inches="tight")
+    ax.set_axisbelow(True)
+    ax.grid(
+        axis="x" if horizontal else "y",
+        color=GRID,
+        linewidth=0.8
+    )
+
+    ax.tick_params(length=0, pad=7)
+
+
+def save_chart(fig, filename):
+    output_path = os.path.join(OUTPUT_DIR, filename)
+
+    fig.savefig(
+        output_path,
+        dpi=150,
+        bbox_inches="tight",
+        pad_inches=0.25,
+        facecolor=BG
+    )
+
     plt.close(fig)
 
-    if not os.path.isfile(path) or os.path.getsize(path) == 0:
-        raise RuntimeError(
-            f"Chart file was not created correctly: {filename}"
-        )
+    if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
+        raise RuntimeError(f"Chart was not saved correctly: {filename}")
+
+    print(f"Saved {filename}: {os.path.getsize(output_path)} bytes")
 
 
-def show_empty(ax, message):
+def show_empty(ax, message="No data available"):
     ax.text(
-        0.5,
-        0.5,
+        0.5, 0.5,
         message,
+        transform=ax.transAxes,
         ha="center",
         va="center",
-        transform=ax.transAxes
+        color=TEXT,
+        fontsize=11
     )
     ax.set_axis_off()
 
 
 def low_stock_chart():
     query = """
-        SELECT
-            product_name,
-            current_stock,
-            reorder_level
+        SELECT product_name, current_stock, reorder_level
         FROM current_stock_report
         WHERE current_stock < reorder_level
         ORDER BY current_stock ASC
     """
 
     df = fetch_data(query)
-    fig, ax = plt.subplots(figsize=(9, 5))
+
+    fig, ax = plt.subplots(figsize=(8, 4.2))
+
+    ax.set_title("Low Stock Products", loc="left", pad=18)
 
     if df.empty:
-        show_empty(ax, "No low-stock products")
+        show_empty(ax)
     else:
-        ax.bar(
+        df = df.head(10)
+        bars = ax.barh(
             df["product_name"],
             df["current_stock"],
-            label="Current Stock"
+            color=SAGE,
+            height=0.55
         )
 
-        ax.plot(
-            df["product_name"],
-            df["reorder_level"],
-            marker="o",
-            linestyle="--",
-            label="Reorder Level"
-        )
+        for bar, value in zip(bars, df["current_stock"]):
+            ax.text(
+                bar.get_width() + 0.2,
+                bar.get_y() + bar.get_height() / 2,
+                str(value),
+                va="center",
+                color=DARK,
+                fontsize=9
+            )
 
-        ax.set_title("Low Stock Products")
-        ax.set_ylabel("Quantity")
-        ax.tick_params(axis="x", labelrotation=35)
-        ax.legend()
+        ax.invert_yaxis()
+        ax.set_xlabel("Current Stock")
+        style_axis(ax, horizontal=True)
 
+    fig.tight_layout()
     save_chart(fig, "low_stock_products.png")
 
 
 def fast_moving_chart():
     query = """
-        SELECT
-            p.product_name,
-            SUM(st.quantity) AS total_sold
+        SELECT p.product_name,
+               SUM(st.quantity) AS total_sold
         FROM stock_transactions st
-        JOIN products p
-            ON st.product_id = p.product_id
+        JOIN products p ON st.product_id = p.product_id
         WHERE st.transaction_type = 'STOCK_OUT'
         GROUP BY p.product_id, p.product_name
         ORDER BY total_sold DESC
@@ -118,146 +169,204 @@ def fast_moving_chart():
     """
 
     df = fetch_data(query)
-    fig, ax = plt.subplots(figsize=(9, 5))
+
+    fig, ax = plt.subplots(figsize=(8, 4.2))
+
+    ax.set_title("Fast Moving Products", loc="left", pad=18)
 
     if df.empty:
-        show_empty(ax, "No stock-out transactions")
+        show_empty(ax)
     else:
-        ax.bar(
+        bars = ax.bar(
             df["product_name"],
-            df["total_sold"]
+            df["total_sold"],
+            color=GREEN,
+            width=0.58
         )
 
-        ax.set_title("Top 10 Fast-Moving Products")
-        ax.set_ylabel("Quantity Sold")
-        ax.tick_params(axis="x", labelrotation=35)
+        for bar, value in zip(bars, df["total_sold"]):
+            ax.text(
+                bar.get_x() + bar.get_width() / 2,
+                bar.get_height(),
+                str(value),
+                ha="center",
+                va="bottom",
+                color=DARK,
+                fontsize=9
+            )
 
+        ax.set_ylabel("Quantity Sold")
+        ax.tick_params(axis="x", rotation=20)
+        style_axis(ax)
+
+    fig.tight_layout()
     save_chart(fig, "fast_moving_products.png")
 
 
 def category_chart():
     query = """
-        SELECT
-            p.category,
-            SUM(r.current_stock) AS total_stock
+        SELECT p.category,
+               SUM(c.current_stock) AS total_stock
         FROM products p
-        JOIN current_stock_report r
-            ON p.product_id = r.product_id
+        JOIN current_stock_report c
+        ON p.product_id = c.product_id
         GROUP BY p.category
         ORDER BY total_stock DESC
     """
 
     df = fetch_data(query)
-    fig, ax = plt.subplots(figsize=(8, 5))
+
+    fig, ax = plt.subplots(figsize=(8, 4.2))
+
+    ax.set_title("Stock by Category", loc="left", pad=18)
 
     if df.empty:
-        show_empty(ax, "No category data")
+        show_empty(ax)
     else:
-        df["category"] = df["category"].fillna("Uncategorized")
+        colors = [GREEN, SAGE, LIGHT_GREEN, GOLD, "#a7b5a1"]
 
-        ax.bar(
-            df["category"],
-            df["total_stock"]
+        wedges, _, _ = ax.pie(
+            df["total_stock"],
+            labels=None,
+            colors=colors[:len(df)],
+            startangle=90,
+            autopct=lambda p: f"{p:.0f}%" if p >= 5 else "",
+            pctdistance=0.72,
+            wedgeprops={
+                "width": 0.42,
+                "edgecolor": BG,
+                "linewidth": 3
+            },
+            textprops={"color": DARK, "fontsize": 9}
         )
 
-        ax.set_title("Stock by Category")
-        ax.set_ylabel("Total Stock")
-        ax.tick_params(axis="x", labelrotation=35)
+        ax.legend(
+            wedges,
+            df["category"].astype(str),
+            loc="center left",
+            bbox_to_anchor=(0.85, 0.5),
+            frameon=False,
+            fontsize=9
+        )
 
+        ax.set_aspect("equal")
+
+    fig.tight_layout()
     save_chart(fig, "stock_by_category.png")
 
 
 def stock_movement_chart():
     query = """
-        SELECT
-            DATE(transaction_date) AS movement_date,
-            SUM(
-                CASE
-                    WHEN transaction_type = 'STOCK_IN'
-                    THEN quantity
-                    ELSE 0
-                END
-            ) AS stock_in,
-            SUM(
-                CASE
-                    WHEN transaction_type = 'STOCK_OUT'
-                    THEN quantity
-                    ELSE 0
-                END
-            ) AS stock_out
+        SELECT DATE(transaction_date) AS movement_date,
+               SUM(CASE
+                   WHEN transaction_type = 'STOCK_IN'
+                   THEN quantity ELSE 0
+               END) AS stock_in,
+               SUM(CASE
+                   WHEN transaction_type = 'STOCK_OUT'
+                   THEN quantity ELSE 0
+               END) AS stock_out
         FROM stock_transactions
         GROUP BY DATE(transaction_date)
         ORDER BY movement_date
     """
 
     df = fetch_data(query)
-    fig, ax = plt.subplots(figsize=(9, 5))
+
+    fig, ax = plt.subplots(figsize=(8, 4.2))
+
+    ax.set_title("Stock Movement Over Time", loc="left", pad=18)
 
     if df.empty:
-        show_empty(ax, "No stock movement data")
+        show_empty(ax)
     else:
+        df["movement_date"] = pd.to_datetime(df["movement_date"])
+
         ax.plot(
             df["movement_date"],
             df["stock_in"],
+            color=GREEN,
+            linewidth=2.5,
             marker="o",
+            markersize=5,
             label="Stock In"
         )
 
         ax.plot(
             df["movement_date"],
             df["stock_out"],
+            color=GOLD,
+            linewidth=2.5,
             marker="o",
+            markersize=5,
             label="Stock Out"
         )
 
-        ax.set_title("Stock Movement Over Time")
-        ax.set_xlabel("Date")
-        ax.set_ylabel("Quantity")
-        ax.tick_params(axis="x", labelrotation=35)
-        ax.legend()
+        ax.fill_between(
+            df["movement_date"],
+            df["stock_in"],
+            color=GREEN,
+            alpha=0.08
+        )
 
+        ax.set_ylabel("Quantity")
+        ax.legend(frameon=False, loc="upper left")
+        ax.tick_params(axis="x", rotation=20)
+        style_axis(ax)
+
+    fig.tight_layout()
     save_chart(fig, "stock_movement_over_time.png")
 
 
 def inventory_value_chart():
     query = """
-        SELECT
-            p.product_name,
-            (r.current_stock * p.unit_cost) AS inventory_value
+        SELECT p.product_name,
+               c.current_stock * p.unit_cost AS inventory_value
         FROM products p
-        JOIN current_stock_report r
-            ON p.product_id = r.product_id
+        JOIN current_stock_report c
+        ON p.product_id = c.product_id
         ORDER BY inventory_value DESC
         LIMIT 10
     """
 
     df = fetch_data(query)
-    fig, ax = plt.subplots(figsize=(9, 5))
+
+    fig, ax = plt.subplots(figsize=(8, 4.2))
+
+    ax.set_title("Inventory Value by Product", loc="left", pad=18)
 
     if df.empty:
-        show_empty(ax, "No inventory value data")
+        show_empty(ax)
     else:
-        ax.bar(
+        bars = ax.barh(
             df["product_name"],
-            df["inventory_value"]
+            df["inventory_value"],
+            color=SAGE,
+            height=0.55
         )
 
-        ax.set_title("Top 10 Products by Inventory Value")
-        ax.set_ylabel("Value (₹)")
-        ax.tick_params(axis="x", labelrotation=35)
+        for bar, value in zip(bars, df["inventory_value"]):
+            ax.text(
+                bar.get_width(),
+                bar.get_y() + bar.get_height() / 2,
+                f"  ₹{value:,.0f}",
+                va="center",
+                color=DARK,
+                fontsize=8
+            )
 
+        ax.invert_yaxis()
+        ax.set_xlabel("Inventory Value (₹)")
+        ax.xaxis.set_major_formatter(
+            mticker.FuncFormatter(lambda x, _: f"₹{x:,.0f}")
+        )
+        style_axis(ax, horizontal=True)
+
+    fig.tight_layout()
     save_chart(fig, "inventory_value_by_product.png")
 
 
 def generate_all_charts():
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-
-    for filename in CHART_FILES:
-        old_file = os.path.join(OUTPUT_DIR, filename)
-
-        if os.path.exists(old_file):
-            os.remove(old_file)
-
     chart_functions = [
         low_stock_chart,
         fast_moving_chart,
@@ -266,21 +375,19 @@ def generate_all_charts():
         inventory_value_chart
     ]
 
-    for chart_function in chart_functions:
-        print(f"Generating {chart_function.__name__}...")
-        chart_function()
+    for filename in CHART_FILES:
+        path = os.path.join(OUTPUT_DIR, filename)
+        if os.path.exists(path):
+            os.remove(path)
 
-    missing_files = [
-        filename
-        for filename in CHART_FILES
-        if not os.path.isfile(os.path.join(OUTPUT_DIR, filename))
-        or os.path.getsize(os.path.join(OUTPUT_DIR, filename)) == 0
-    ]
+    for function in chart_functions:
+        function()
 
-    if missing_files:
-        raise RuntimeError(
-            "Missing chart files: " + ", ".join(missing_files)
-        )
+    for filename in CHART_FILES:
+        path = os.path.join(OUTPUT_DIR, filename)
+
+        if not os.path.exists(path) or os.path.getsize(path) == 0:
+            raise RuntimeError(f"Missing or empty chart: {filename}")
 
     print("All five charts generated successfully.")
 
@@ -288,10 +395,6 @@ def generate_all_charts():
 if __name__ == "__main__":
     try:
         generate_all_charts()
-    except Exception as error:
-        print(
-            f"CHART GENERATION ERROR: {error}",
-            file=sys.stderr
-        )
+    except Exception:
         traceback.print_exc()
         sys.exit(1)
