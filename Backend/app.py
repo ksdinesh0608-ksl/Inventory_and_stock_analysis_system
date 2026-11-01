@@ -1,12 +1,21 @@
 
-from flask import Flask, jsonify, request, send_from_directory
-import mysql.connector
 import os
 import sys
-import subprocess
 import math
+import subprocess
+from functools import wraps
+
+import mysql.connector
+from flask import (
+    Flask,
+    jsonify,
+    request,
+    send_from_directory,
+    session
+)
 
 from db_connection import get_db_connection
+
 from inventory_logic import (
     get_all_products,
     add_product,
@@ -15,19 +24,62 @@ from inventory_logic import (
     record_stock_in,
     record_stock_out,
     get_low_stock_products,
-    get_all_transactions
+    get_all_transactions,
+    create_staff_user,
+    authenticate_user,
+    get_user_by_id,
+    get_pending_users,
+    update_user_approval
 )
+
 
 app = Flask(__name__)
 
-BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+app.secret_key = os.environ.get(
+    "SECRET_KEY",
+    "development-secret-key-change-before-deployment"
+)
+
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=os.environ.get("FLASK_ENV") == "production",
+    PERMANENT_SESSION_LIFETIME=60 * 60 * 8
+)
+
+BASE_DIR = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..")
+)
 
 FRONTEND_FOLDER = os.path.join(BASE_DIR, "Frontend")
 ANALYSIS_FOLDER = BASE_DIR
+
 ANALYSIS_SCRIPT = os.path.join(
     ANALYSIS_FOLDER,
     "matplotlib_visualization.py"
 )
+
+
+def admin_required(function):
+    @wraps(function)
+    def decorated_function(*args, **kwargs):
+        user_id = session.get("user_id")
+
+        if not user_id:
+            return jsonify({"error": "Login required"}), 401
+
+        user = get_user_by_id(user_id)
+
+        if not user or user["user_role"] != "ADMIN":
+            return jsonify({"error": "Admin access required"}), 403
+
+        if user["approval_status"] != "APPROVED" or not user["is_active"]:
+            session.clear()
+            return jsonify({"error": "Account is not active"}), 403
+
+        return function(*args, **kwargs)
+
+    return decorated_function
 
 
 @app.route("/")
@@ -48,6 +100,7 @@ def test_db():
     try:
         connection = get_db_connection()
         cursor = connection.cursor()
+
         cursor.execute("SHOW TABLES")
         tables = cursor.fetchall()
 
@@ -58,6 +111,7 @@ def test_db():
 
     except Exception:
         app.logger.exception("Database test failed")
+
         return jsonify({
             "error": "Could not retrieve database tables"
         }), 500
@@ -65,8 +119,229 @@ def test_db():
     finally:
         if cursor is not None:
             cursor.close()
+
         if connection is not None and connection.is_connected():
             connection.close()
+
+
+@app.route("/signup", methods=["POST"])
+def signup():
+    data = request.get_json(silent=True)
+
+    if not isinstance(data, dict):
+        return jsonify({"error": "Send a valid JSON object"}), 400
+
+    full_name = data.get("full_name")
+    username = data.get("username")
+    email = data.get("email")
+    password = data.get("password")
+
+    if not all(
+        isinstance(value, str) and value.strip()
+        for value in (full_name, username, email, password)
+    ):
+        return jsonify({
+            "error": "All fields are required"
+        }), 400
+
+    full_name = full_name.strip()
+    username = username.strip()
+    email = email.strip().lower()
+
+    if len(password) < 8:
+        return jsonify({
+            "error": "Password must contain at least 8 characters"
+        }), 400
+
+    if "@" not in email or "." not in email.split("@")[-1]:
+        return jsonify({
+            "error": "Enter a valid email address"
+        }), 400
+
+    try:
+        user_id = create_staff_user(
+            full_name,
+            username,
+            email,
+            password
+        )
+
+        return jsonify({
+            "message": "Signup successful. Wait for admin approval.",
+            "user_id": user_id,
+            "approval_status": "PENDING"
+        }), 201
+
+    except mysql.connector.IntegrityError:
+        return jsonify({
+            "error": "Username or email already exists"
+        }), 409
+
+    except Exception:
+        app.logger.exception("Signup failed")
+
+        return jsonify({
+            "error": "Could not create account"
+        }), 500
+
+
+@app.route("/login", methods=["POST"])
+def login():
+    data = request.get_json(silent=True)
+
+    if not isinstance(data, dict):
+        return jsonify({"error": "Send a valid JSON object"}), 400
+
+    identifier = data.get("identifier") or data.get("username")
+    password = data.get("password")
+
+    if not isinstance(identifier, str) or not identifier.strip():
+        return jsonify({"error": "Username or email is required"}), 400
+
+    if not isinstance(password, str) or not password:
+        return jsonify({"error": "Password is required"}), 400
+
+    try:
+        result = authenticate_user(
+            identifier.strip(),
+            password
+        )
+
+        status = result["status"]
+
+        messages = {
+            "INVALID_CREDENTIALS": "Invalid username or password",
+            "PENDING": "Your account is waiting for admin approval",
+            "REJECTED": "Your account registration was rejected",
+            "INACTIVE": "Your account is inactive"
+        }
+
+        if status != "SUCCESS":
+            return jsonify({
+                "error": messages.get(status, "Login failed"),
+                "status": status
+            }), 401
+
+        user = result["user"]
+
+        session.clear()
+        session["user_id"] = user["user_id"]
+        session.permanent = True
+
+        return jsonify({
+            "message": "Login successful",
+            "user": user
+        }), 200
+
+    except Exception:
+        app.logger.exception("Login failed")
+
+        return jsonify({
+            "error": "Could not process login"
+        }), 500
+
+
+@app.route("/logout", methods=["POST"])
+def logout():
+    session.clear()
+
+    return jsonify({
+        "message": "Logged out successfully"
+    }), 200
+
+
+@app.route("/me", methods=["GET"])
+def current_user():
+    user_id = session.get("user_id")
+
+    if not user_id:
+        return jsonify({
+            "authenticated": False
+        }), 200
+
+    try:
+        user = get_user_by_id(user_id)
+
+        if (
+            not user
+            or not user["is_active"]
+            or user["approval_status"] != "APPROVED"
+        ):
+            session.clear()
+
+            return jsonify({
+                "authenticated": False
+            }), 200
+
+        return jsonify({
+            "authenticated": True,
+            "user": user
+        }), 200
+
+    except Exception:
+        app.logger.exception("Could not retrieve current user")
+
+        return jsonify({
+            "error": "Could not retrieve account"
+        }), 500
+
+
+@app.route("/admin/pending-users", methods=["GET"])
+@admin_required
+def pending_users():
+    try:
+        users = get_pending_users()
+
+        return jsonify({
+            "count": len(users),
+            "users": users
+        }), 200
+
+    except Exception:
+        app.logger.exception("Could not retrieve pending users")
+
+        return jsonify({
+            "error": "Could not retrieve pending users"
+        }), 500
+
+
+@app.route("/admin/users/<int:user_id>/approval", methods=["PUT"])
+@admin_required
+def approve_user(user_id):
+    data = request.get_json(silent=True)
+
+    if not isinstance(data, dict):
+        return jsonify({"error": "Send a valid JSON object"}), 400
+
+    approval_status = data.get("approval_status")
+
+    if approval_status not in ("APPROVED", "REJECTED"):
+        return jsonify({
+            "error": "Approval status must be APPROVED or REJECTED"
+        }), 400
+
+    try:
+        updated = update_user_approval(
+            user_id,
+            approval_status
+        )
+
+        if not updated:
+            return jsonify({
+                "error": "Pending staff account not found"
+            }), 404
+
+        return jsonify({
+            "message": f"Staff account {approval_status.lower()} successfully",
+            "approval_status": approval_status
+        }), 200
+
+    except Exception:
+        app.logger.exception("User approval update failed")
+
+        return jsonify({
+            "error": "Could not update account approval"
+        }), 500
 
 
 @app.route("/products", methods=["GET"])
@@ -76,6 +351,7 @@ def get_products():
 
     except Exception:
         app.logger.exception("Failed to retrieve products")
+
         return jsonify({
             "error": "Could not retrieve products"
         }), 500
@@ -147,7 +423,10 @@ def add_product_route():
 
     except Exception:
         app.logger.exception("Failed to add product")
-        return jsonify({"error": "Could not add product"}), 500
+
+        return jsonify({
+            "error": "Could not add product"
+        }), 500
 
 
 @app.route("/products/<int:product_id>", methods=["PUT"])
@@ -209,7 +488,10 @@ def update_product_route(product_id):
 
     except Exception:
         app.logger.exception("Failed to update product")
-        return jsonify({"error": "Could not update product"}), 500
+
+        return jsonify({
+            "error": "Could not update product"
+        }), 500
 
 
 @app.route("/products/<int:product_id>", methods=["DELETE"])
@@ -231,7 +513,10 @@ def delete_product_route(product_id):
 
     except Exception:
         app.logger.exception("Failed to delete product")
-        return jsonify({"error": "Could not delete product"}), 500
+
+        return jsonify({
+            "error": "Could not delete product"
+        }), 500
 
 
 @app.route("/stock-in", methods=["POST"])
@@ -295,6 +580,7 @@ def stock_in():
 
     except Exception:
         app.logger.exception("Stock-in failed")
+
         return jsonify({
             "error": "Could not record incoming stock"
         }), 500
@@ -336,6 +622,7 @@ def stock_out():
         if "error" in result:
             message = result["error"]
             status = 404 if message == "Product SKU not found" else 400
+
             return jsonify({"error": message}), status
 
         return jsonify({
@@ -348,6 +635,7 @@ def stock_out():
 
     except Exception:
         app.logger.exception("Stock-out failed")
+
         return jsonify({
             "error": "Could not record stock-out"
         }), 500
@@ -365,6 +653,7 @@ def get_low_stock():
 
     except Exception:
         app.logger.exception("Failed to retrieve low-stock products")
+
         return jsonify({
             "error": "Could not retrieve low-stock products"
         }), 500
@@ -382,6 +671,7 @@ def get_transactions():
 
     except Exception:
         app.logger.exception("Failed to retrieve transactions")
+
         return jsonify({
             "error": "Could not retrieve transactions"
         }), 500
@@ -406,6 +696,7 @@ def get_suppliers():
 
     except Exception:
         app.logger.exception("Failed to retrieve suppliers")
+
         return jsonify({
             "error": "Could not retrieve suppliers"
         }), 500
@@ -439,10 +730,23 @@ def add_supplier():
         return jsonify({"error": "Email must be text"}), 400
 
     supplier_name = supplier_name.strip()
-    phone_number = phone_number.strip() if phone_number and phone_number.strip() else None
-    email = email.strip() if email and email.strip() else None
 
-    if email and ("@" not in email or "." not in email.split("@")[-1]):
+    phone_number = (
+        phone_number.strip()
+        if phone_number and phone_number.strip()
+        else None
+    )
+
+    email = (
+        email.strip().lower()
+        if email and email.strip()
+        else None
+    )
+
+    if email and (
+        "@" not in email
+        or "." not in email.split("@")[-1]
+    ):
         return jsonify({"error": "Enter a valid email address"}), 400
 
     connection = None
@@ -452,14 +756,15 @@ def add_supplier():
         connection = get_db_connection()
         cursor = connection.cursor()
 
-        cursor.execute(
-            """
+        cursor.execute("""
             INSERT INTO suppliers
                 (supplier_name, phone_number, email)
             VALUES (%s, %s, %s)
-            """,
-            (supplier_name, phone_number, email)
-        )
+        """, (
+            supplier_name,
+            phone_number,
+            email
+        ))
 
         supplier_id = cursor.lastrowid
         connection.commit()
@@ -473,7 +778,7 @@ def add_supplier():
         }), 201
 
     except mysql.connector.IntegrityError:
-        if connection is not None:
+        if connection is not None and connection.is_connected():
             connection.rollback()
 
         return jsonify({
@@ -481,10 +786,11 @@ def add_supplier():
         }), 409
 
     except Exception:
-        if connection is not None:
+        if connection is not None and connection.is_connected():
             connection.rollback()
 
         app.logger.exception("Failed to add supplier")
+
         return jsonify({
             "error": "Could not add supplier"
         }), 500
@@ -529,9 +835,13 @@ def debug_frontend():
 @app.route("/refresh-charts", methods=["POST"])
 def refresh_charts():
     if not os.path.isfile(ANALYSIS_SCRIPT):
-        app.logger.error("Analysis script not found: %s", ANALYSIS_SCRIPT)
+        app.logger.error(
+            "Analysis script not found: %s",
+            ANALYSIS_SCRIPT
+        )
+
         return jsonify({
-            "error": f"Analysis script not found: {ANALYSIS_SCRIPT}"
+            "error": "Analysis script not found"
         }), 500
 
     try:
@@ -550,8 +860,9 @@ def refresh_charts():
                 result.stdout,
                 result.stderr
             )
+
             return jsonify({
-                "error": "Chart generation failed. Check the Flask terminal."
+                "error": "Chart generation failed. Check the Flask logs."
             }), 500
 
         return jsonify({
@@ -561,12 +872,14 @@ def refresh_charts():
 
     except subprocess.TimeoutExpired:
         app.logger.exception("Chart generation timed out")
+
         return jsonify({
             "error": "Chart generation timed out"
         }), 504
 
     except Exception:
         app.logger.exception("Chart refresh failed")
+
         return jsonify({
             "error": "Could not refresh charts"
         }), 500
@@ -574,8 +887,21 @@ def refresh_charts():
 
 @app.route("/charts/<path:filename>", methods=["GET"])
 def show_chart(filename):
-    return send_from_directory(ANALYSIS_FOLDER, filename)
+    response = send_from_directory(
+        ANALYSIS_FOLDER,
+        filename
+    )
+
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+
+    return response
 
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(
+        host="0.0.0.0",
+        port=int(os.environ.get("PORT", 5000)),
+        debug=os.environ.get("FLASK_DEBUG", "false").lower() == "true"
+    )
