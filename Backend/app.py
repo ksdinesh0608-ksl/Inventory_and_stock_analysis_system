@@ -65,6 +65,14 @@ ANALYSIS_SCRIPT = os.path.join(
     "matplotlib_visualization.py"
 )
 
+CHART_FILES = {
+    "low_stock_products.png",
+    "fast_moving_products.png",
+    "stock_by_category.png",
+    "stock_movement_over_time.png",
+    "inventory_value_by_product.png"
+}
+
 
 def login_required(function):
     @wraps(function)
@@ -77,23 +85,25 @@ def login_required(function):
         try:
             user = get_user_by_id(user_id)
 
-            if not user:
-                session.clear()
-                return jsonify({"error": "Account not found"}), 401
-
-            if not user["is_active"]:
-                session.clear()
-                return jsonify({"error": "Account is inactive"}), 403
-
-            if user["approval_status"] != "APPROVED":
-                session.clear()
-                return jsonify({"error": "Account is not approved"}), 403
-
-            return function(*args, **kwargs)
-
         except Exception:
-            app.logger.exception("Authentication check failed")
-            return jsonify({"error": "Could not verify account"}), 500
+            app.logger.exception("Authentication database check failed")
+            return jsonify({
+                "error": "Could not verify account"
+            }), 500
+
+        if not user:
+            session.clear()
+            return jsonify({"error": "Account not found"}), 401
+
+        if not user["is_active"]:
+            session.clear()
+            return jsonify({"error": "Account is inactive"}), 403
+
+        if user["approval_status"] != "APPROVED":
+            session.clear()
+            return jsonify({"error": "Account is not approved"}), 403
+
+        return function(*args, **kwargs)
 
     return decorated_function
 
@@ -102,7 +112,14 @@ def admin_required(function):
     @wraps(function)
     @login_required
     def decorated_function(*args, **kwargs):
-        user = get_user_by_id(session["user_id"])
+        try:
+            user = get_user_by_id(session["user_id"])
+
+        except Exception:
+            app.logger.exception("Admin verification failed")
+            return jsonify({
+                "error": "Could not verify administrator"
+            }), 500
 
         if not user or user["user_role"] != "ADMIN":
             return jsonify({"error": "Admin access required"}), 403
@@ -272,7 +289,54 @@ def pending_users():
 
     except Exception:
         app.logger.exception("Could not retrieve pending users")
-        return jsonify({"error": "Could not retrieve pending users"}), 500
+        return jsonify({
+            "error": "Could not retrieve pending users"
+        }), 500
+
+
+@app.route("/admin/approved-users", methods=["GET"])
+@admin_required
+def approved_users():
+    connection = None
+    cursor = None
+
+    try:
+        connection = get_db_connection()
+        cursor = connection.cursor(dictionary=True)
+
+        cursor.execute("""
+            SELECT
+                user_id,
+                full_name,
+                username,
+                email,
+                created_at
+            FROM users
+            WHERE user_role = 'STAFF'
+              AND approval_status = 'APPROVED'
+              AND is_active = 1
+            ORDER BY created_at DESC
+        """)
+
+        users = cursor.fetchall()
+
+        return jsonify({
+            "count": len(users),
+            "users": users
+        }), 200
+
+    except Exception:
+        app.logger.exception("Could not retrieve approved users")
+        return jsonify({
+            "error": "Could not retrieve approved users"
+        }), 500
+
+    finally:
+        if cursor is not None:
+            cursor.close()
+
+        if connection is not None and connection.is_connected():
+            connection.close()
 
 
 @app.route("/admin/users/<int:user_id>/approval", methods=["PUT"])
@@ -299,13 +363,18 @@ def approve_user(user_id):
             }), 404
 
         return jsonify({
-            "message": f"Staff account {approval_status.lower()} successfully",
-            "approval_status": approval_status
+            "message": (
+                f"Staff account {approval_status.lower()} successfully"
+            ),
+            "approval_status": approval_status,
+            "user_id": user_id
         }), 200
 
     except Exception:
         app.logger.exception("User approval update failed")
-        return jsonify({"error": "Could not update account approval"}), 500
+        return jsonify({
+            "error": "Could not update account approval"
+        }), 500
 
 
 @app.route("/products", methods=["GET"])
@@ -505,7 +574,12 @@ def stock_in():
         return jsonify({"error": "Notes must be text"}), 400
 
     try:
-        result = record_stock_in(sku.strip(), quantity, supplier_id, notes)
+        result = record_stock_in(
+            sku.strip(),
+            quantity,
+            supplier_id,
+            notes
+        )
 
         if "error" in result:
             return jsonify({"error": result["error"]}), 400
@@ -558,6 +632,7 @@ def stock_out():
         if "error" in result:
             message = result["error"]
             status = 404 if message == "Product SKU not found" else 400
+
             return jsonify({"error": message}), status
 
         return jsonify({
@@ -614,10 +689,17 @@ def download_transactions():
         transactions = get_all_transactions()
 
         if not transactions:
-            return jsonify({"error": "No transactions available to download"}), 404
+            return jsonify({
+                "error": "No transactions available to download"
+            }), 404
 
-        if not isinstance(transactions, list) or not isinstance(transactions[0], dict):
-            return jsonify({"error": "Transaction data format is invalid"}), 500
+        if (
+            not isinstance(transactions, list)
+            or not isinstance(transactions[0], dict)
+        ):
+            return jsonify({
+                "error": "Transaction data format is invalid"
+            }), 500
 
         fieldnames = list(dict.fromkeys(
             key
@@ -626,6 +708,7 @@ def download_transactions():
         ))
 
         output = io.StringIO()
+
         writer = csv.DictWriter(
             output,
             fieldnames=fieldnames,
@@ -635,7 +718,10 @@ def download_transactions():
         writer.writeheader()
         writer.writerows(transactions)
 
-        csv_file = io.BytesIO(output.getvalue().encode("utf-8-sig"))
+        csv_file = io.BytesIO(
+            output.getvalue().encode("utf-8-sig")
+        )
+
         csv_file.seek(0)
 
         return send_file(
@@ -647,7 +733,9 @@ def download_transactions():
 
     except Exception:
         app.logger.exception("Transaction download failed")
-        return jsonify({"error": "Could not download transaction history"}), 500
+        return jsonify({
+            "error": "Could not download transaction history"
+        }), 500
 
 
 @app.route("/suppliers", methods=["GET"])
@@ -788,7 +876,9 @@ def test_db():
 
     except Exception:
         app.logger.exception("Database test failed")
-        return jsonify({"error": "Could not retrieve database tables"}), 500
+        return jsonify({
+            "error": "Could not retrieve database tables"
+        }), 500
 
     finally:
         if cursor is not None:
@@ -838,7 +928,9 @@ def refresh_charts():
             ANALYSIS_SCRIPT
         )
 
-        return jsonify({"error": "Analysis script not found"}), 500
+        return jsonify({
+            "error": "Analysis script not found"
+        }), 500
 
     try:
         result = subprocess.run(
@@ -846,38 +938,60 @@ def refresh_charts():
             cwd=ANALYSIS_FOLDER,
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=240,
             check=False
         )
 
         if result.returncode != 0:
             app.logger.error(
-                "Chart generation failed.\nSTDOUT: %s\nSTDERR: %s",
+                "Chart generation failed.\nSTDOUT:\n%s\nSTDERR:\n%s",
                 result.stdout,
                 result.stderr
             )
 
             return jsonify({
-                "error": "Chart generation failed. Check the Flask logs."
+                "error": "Chart generation failed. Check Render logs.",
+                "details": result.stderr[-2500:]
             }), 500
 
         return jsonify({
-            "message": "Charts refreshed successfully",
+            "message": "All five charts refreshed successfully.",
             "output": result.stdout.strip()
         }), 200
 
     except subprocess.TimeoutExpired:
         app.logger.exception("Chart generation timed out")
-        return jsonify({"error": "Chart generation timed out"}), 504
+
+        return jsonify({
+            "error": "Chart generation took too long. Please try again."
+        }), 504
 
     except Exception:
         app.logger.exception("Chart refresh failed")
-        return jsonify({"error": "Could not refresh charts"}), 500
+
+        return jsonify({
+            "error": "Could not refresh charts"
+        }), 500
 
 
 @app.route("/charts/<path:filename>", methods=["GET"])
 @login_required
 def show_chart(filename):
+    if filename not in CHART_FILES:
+        return jsonify({
+            "error": "Chart not found"
+        }), 404
+
+    chart_path = os.path.join(ANALYSIS_FOLDER, filename)
+
+    if not os.path.isfile(chart_path):
+        return jsonify({
+            "error": (
+                f"{filename} has not been generated yet. "
+                "Please refresh charts."
+            )
+        }), 404
+
     response = send_from_directory(
         ANALYSIS_FOLDER,
         filename
