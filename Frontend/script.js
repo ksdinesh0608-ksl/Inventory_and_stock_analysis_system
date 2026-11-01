@@ -8,6 +8,7 @@ const state = {
     transactions: [],
     lowStock: [],
     pendingUsers: [],
+    approvedUsers: [],
     chart: null,
     currentPage: "overview",
     eventsBound: false
@@ -238,8 +239,8 @@ function showPage(page) {
     }
 
     if (page === "users") {
-        loadPendingUsers();
-    }
+    loadUserManagement();
+}
 }
 
 function bindNavigationEvents() {
@@ -1201,7 +1202,28 @@ async function refreshCharts() {
     }
 }
 
+
 /* USER MANAGEMENT */
+
+async function loadUserManagement() {
+    if (!isAdmin()) return;
+
+    const pendingTable = $("pendingUsersTable");
+    const approvedTable = $("approvedUsersTable");
+
+    if (pendingTable) {
+        pendingTable.innerHTML = `<tr><td colspan="4">Loading requests...</td></tr>`;
+    }
+
+    if (approvedTable) {
+        approvedTable.innerHTML = `<tr><td colspan="4">Loading approved users...</td></tr>`;
+    }
+
+    await Promise.all([
+        loadPendingUsers(),
+        loadApprovedUsers()
+    ]);
+}
 
 async function loadPendingUsers() {
     if (!isAdmin()) return;
@@ -1214,7 +1236,34 @@ async function loadPendingUsers() {
         renderPendingUsers();
     } catch (error) {
         console.error("Pending users:", error);
+
+        if ($("pendingUsersTable")) {
+            $("pendingUsersTable").innerHTML =
+                `<tr><td colspan="4">Unable to load pending requests.</td></tr>`;
+        }
+
         showToast(error.message || "Unable to load pending users.", "error");
+    }
+}
+
+async function loadApprovedUsers() {
+    if (!isAdmin()) return;
+
+    try {
+        const data = await apiRequest("/admin/approved-users");
+
+        state.approvedUsers = getArray(data, "users");
+
+        renderApprovedUsers();
+    } catch (error) {
+        console.error("Approved users:", error);
+
+        if ($("approvedUsersTable")) {
+            $("approvedUsersTable").innerHTML =
+                `<tr><td colspan="4">Unable to load approved users.</td></tr>`;
+        }
+
+        showToast(error.message || "Unable to load approved users.", "error");
     }
 }
 
@@ -1223,10 +1272,15 @@ function renderPendingUsers() {
 
     if (!table) return;
 
+    if ($("pendingCount")) {
+        $("pendingCount").textContent =
+            `${state.pendingUsers.length} Pending`;
+    }
+
     if (!state.pendingUsers.length) {
         table.innerHTML = `
             <tr>
-                <td colspan="4">No pending users found.</td>
+                <td colspan="4">No pending requests.</td>
             </tr>
         `;
         return;
@@ -1238,16 +1292,121 @@ function renderPendingUsers() {
             <td>${escapeHTML(user.username)}</td>
             <td>${escapeHTML(user.email)}</td>
             <td>
-                <button class="approve-user-btn" data-id="${user.user_id}">
+                <button
+                    type="button"
+                    class="approve-user-btn"
+                    data-id="${escapeHTML(user.user_id)}">
                     Approve
                 </button>
-                <button class="reject-user-btn" data-id="${user.user_id}">
+
+                <button
+                    type="button"
+                    class="reject-user-btn"
+                    data-id="${escapeHTML(user.user_id)}">
                     Reject
                 </button>
             </td>
         </tr>
     `).join("");
 }
+
+function renderApprovedUsers() {
+    const table = $("approvedUsersTable");
+
+    if (!table) return;
+
+    if ($("approvedCount")) {
+        $("approvedCount").textContent =
+            `${state.approvedUsers.length} Approved`;
+    }
+
+    if (!state.approvedUsers.length) {
+        table.innerHTML = `
+            <tr>
+                <td colspan="4">No approved staff members yet.</td>
+            </tr>
+        `;
+        return;
+    }
+
+    table.innerHTML = state.approvedUsers.map(user => `
+        <tr>
+            <td>${escapeHTML(user.full_name)}</td>
+            <td>${escapeHTML(user.username)}</td>
+            <td>${escapeHTML(user.email)}</td>
+            <td>
+                <span class="stock-status">Approved</span>
+            </td>
+        </tr>
+    `).join("");
+}
+
+async function handlePendingUserClick(event) {
+    const approveButton = event.target.closest(".approve-user-btn");
+    const rejectButton = event.target.closest(".reject-user-btn");
+
+    if (!approveButton && !rejectButton) return;
+
+    if (!isAdmin()) return;
+
+    const button = approveButton || rejectButton;
+    const userId = button.dataset.id;
+
+    const approvalStatus = approveButton ? "APPROVED" : "REJECTED";
+
+    const action = approveButton ? "approve" : "reject";
+
+    if (!userId) {
+        showToast("Invalid user ID.", "error");
+        return;
+    }
+
+    if (!confirm(`Are you sure you want to ${action} this account?`)) {
+        return;
+    }
+
+    const row = button.closest("tr");
+
+    if (row) {
+        row.querySelectorAll("button").forEach(item => {
+            item.disabled = true;
+        });
+    }
+
+    try {
+        const data = await apiRequest(
+            `/admin/users/${encodeURIComponent(userId)}/approval`,
+            {
+                method: "PUT",
+                body: JSON.stringify({
+                    approval_status: approvalStatus
+                })
+            }
+        );
+
+        showToast(
+            data.message ||
+            (approveButton
+                ? "Staff account approved successfully."
+                : "Staff account rejected successfully.")
+        );
+
+        await loadUserManagement();
+
+    } catch (error) {
+        showToast(
+            error.message || `Unable to ${action} this account.`,
+            "error"
+        );
+
+        if (row) {
+            row.querySelectorAll("button").forEach(item => {
+                item.disabled = false;
+            });
+        }
+    }
+}
+
 /* INITIALIZATION */
 
 document.addEventListener("DOMContentLoaded", () => {
