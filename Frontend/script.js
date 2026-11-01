@@ -174,53 +174,48 @@ function applyRolePermissions() {
 }
 
 /* SIDEBAR NAVIGATION */
-
 function showPage(page) {
-    const allowedPages = [
-        "overview",
-        "products",
-        "suppliers",
-        "stock-in",
-        "stock-out",
-        "transactions",
-        "low-stock",
-        "analysis",
-        "users"
-    ];
+    const pageSections = {
+        overview: "overview",
+        products: "products",
+        suppliers: "suppliers",
+        "stock-in": "stock-in",
+        "stock-out": "stock-out",
+        transactions: "transactions",
+        "low-stock": "low-stock",
+        analysis: "analysis",
+        users: "users"
+    };
 
-    if (!allowedPages.includes(page)) {
-        console.error("Unknown page:", page);
+    const sectionId = pageSections[page];
+
+    if (!sectionId) {
+        console.error("Invalid page:", page);
+        showToast("Page not found", "error");
         return;
     }
 
-    const adminPages = ["stock-in", "stock-out", "users"];
-
-    if (adminPages.includes(page) && !isAdmin()) {
-        showToast("You don't have permission to access this page.", "error");
-        return;
-    }
-
-    const section = $(`${page}Page`);
+    const section = document.getElementById(sectionId);
 
     if (!section) {
-        console.error(`Page section not found: ${page}Page`);
-        showToast(`Page not found: ${page}`, "error");
+        console.error("Section not found:", sectionId);
+        showToast("Page not found: " + page, "error");
         return;
     }
 
-    document.querySelectorAll(".page-section").forEach((element) => {
-        element.classList.remove("active");
+    document.querySelectorAll(".page-section").forEach(item => {
+        item.classList.add("hidden");
+        item.classList.remove("active");
     });
 
+    section.classList.remove("hidden");
     section.classList.add("active");
 
-    document.querySelectorAll(".nav-link[data-page]").forEach((element) => {
-        element.classList.toggle("active", element.dataset.page === page);
+    document.querySelectorAll(".nav-link").forEach(link => {
+        link.classList.toggle("active", link.dataset.page === page);
     });
 
-    state.currentPage = page;
-
-    const titles = {
+    const pageTitles = {
         overview: "Overview",
         products: "Products",
         suppliers: "Suppliers",
@@ -232,16 +227,11 @@ function showPage(page) {
         users: "User Management"
     };
 
-    if ($("pageTitle")) {
-        $("pageTitle").textContent = titles[page] || "Stockwise";
-    }
+    const title = document.getElementById("pageTitle");
+    if (title) title.textContent = pageTitles[page];
 
-    if (page === "analysis") {
-        loadAnalysisImages();
-    }
-
-    if (page === "users" && isAdmin()) {
-        loadPendingUsers();
+    if (typeof loadPageData === "function") {
+        loadPageData(page);
     }
 }
 
