@@ -457,26 +457,70 @@
             </div>
         </section>
 
-        <!-- USER MANAGEMENT -->
-        <section id="users" class="page-section hidden">
-            <div class="section-toolbar"><div><h2>User Management</h2><p>Review staff account requests.</p></div></div>
-            <article class="panel">
-                <div class="panel-header"><div><h3>Pending Requests</h3><p id="pendingUsersLabel">Accounts waiting for approval</p></div><span class="panel-tag" id="pendingCount">Pending</span></div>
-                <div class="table-wrap">
-                    <table>
-                        <thead><tr><th>Full Name</th><th>Username</th><th>Email</th><th>Actions</th></tr></thead>
-                        <tbody id="pendingUsersTable"></tbody>
-                    </table>
-                </div>
-            </article>
-        </section>
+        
+<!-- USER MANAGEMENT -->
+<section id="users" class="page-section hidden">
+    <div class="section-toolbar">
+        <div>
+            <h2>User Management</h2>
+            <p>Manage staff account requests and approved users.</p>
+        </div>
+    </div>
 
-        <footer class="app-footer">
-            <span>Stockwise · Inventory Management</span>
-            <span>Inventory and Stock Analysis System</span>
-        </footer>
-    </main>
-</div>
+    <div class="dashboard-grid user-management-grid">
+        <article class="panel">
+            <div class="panel-header">
+                <div>
+                    <h3>Pending Requests</h3>
+                    <p>Accounts waiting for approval</p>
+                </div>
+                <span class="panel-tag" id="pendingCount">0 Pending</span>
+            </div>
+
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Full Name</th>
+                            <th>Username</th>
+                            <th>Email</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="pendingUsersTable">
+                        <tr><td colspan="4">Loading requests...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </article>
+
+        <article class="panel">
+            <div class="panel-header">
+                <div>
+                    <h3>Approved Requests</h3>
+                    <p>Staff members approved by admin</p>
+                </div>
+                <span class="panel-tag" id="approvedCount">0 Approved</span>
+            </div>
+
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Full Name</th>
+                            <th>Username</th>
+                            <th>Email</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="approvedUsersTable">
+                        <tr><td colspan="4">Loading approved users...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </article>
+    </div>
+</section>
 
 <!-- PRODUCT MODAL -->
 <div id="productModal" class="modal-backdrop hidden">
