@@ -1220,61 +1220,34 @@ async function loadPendingUsers() {
 
 function renderPendingUsers() {
     const table = $("pendingUsersTable");
+
     if (!table) return;
 
-    if ($("pendingCount")) {
-        $("pendingCount").textContent = number(state.pendingUsers.length);
-    }
-
-    if ($("pendingUsersLabel")) {
-        $("pendingUsersLabel").textContent =
-            `${state.pendingUsers.length} pending approval`;
-    }
-
-    table.innerHTML = state.pendingUsers.length
-        ? state.pendingUsers.map((user) => `
+    if (!state.pendingUsers.length) {
+        table.innerHTML = `
             <tr>
-                <td>${escapeHTML(user.full_name || "—")}</td>
-                <td>${escapeHTML(user.username || "—")}</td>
-                <td>${escapeHTML(user.email || "—")}</td>
-                <td>${escapeHTML(user.created_at ? getTransactionDate({ created_at: user.created_at }) : "—")}</td>
-                <td>
-                    <button class="table-action" data-approve-user="${escapeHTML(user.user_id)}">Approve</button>
-                    <button class="table-action delete" data-reject-user="${escapeHTML(user.user_id)}">Reject</button>
-                </td>
+                <td colspan="4">No pending users found.</td>
             </tr>
-        `).join("")
-        : `<tr><td colspan="5">No pending users.</td></tr>`;
-}
-
-async function handlePendingUserClick(event) {
-    const approveButton = event.target.closest("[data-approve-user]");
-    const rejectButton = event.target.closest("[data-reject-user]");
-
-    if (!approveButton && !rejectButton) return;
-
-    const button = approveButton || rejectButton;
-    const userId = button.dataset.approveUser || button.dataset.rejectUser;
-    const status = approveButton ? "APPROVED" : "REJECTED";
-
-    if (!confirm(`Are you sure you want to ${status.toLowerCase()} this user?`)) {
+        `;
         return;
     }
 
-    try {
-        await apiRequest(`/admin/users/${userId}/approval`, {
-            method: "PUT",
-            body: JSON.stringify({ approval_status: status })
-        });
-
-        await loadPendingUsers();
-
-        showToast(`User ${status.toLowerCase()} successfully.`);
-    } catch (error) {
-        showToast(error.message || "Unable to update user.", "error");
-    }
+    table.innerHTML = state.pendingUsers.map(user => `
+        <tr>
+            <td>${escapeHTML(user.full_name)}</td>
+            <td>${escapeHTML(user.username)}</td>
+            <td>${escapeHTML(user.email)}</td>
+            <td>
+                <button class="approve-user-btn" data-id="${user.user_id}">
+                    Approve
+                </button>
+                <button class="reject-user-btn" data-id="${user.user_id}">
+                    Reject
+                </button>
+            </td>
+        </tr>
+    `).join("");
 }
-
 /* INITIALIZATION */
 
 document.addEventListener("DOMContentLoaded", () => {
