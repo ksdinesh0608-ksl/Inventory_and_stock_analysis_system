@@ -59,7 +59,9 @@ async function apiRequest(url, options = {}) {
     }
 
     if (!response.ok) {
-        throw new Error(data.message || data.error || `Request failed (${response.status})`);
+        throw new Error(
+            data.message || data.error || `Request failed (${response.status})`
+        );
     }
 
     return data;
@@ -98,6 +100,13 @@ function clearMessage(elementId) {
 /* AUTHENTICATION PAGES */
 
 function showAuthPage(page) {
+    const target = $(page);
+
+    if (!target) {
+        console.error(`Page element not found: ${page}`);
+        return;
+    }
+
     [
         "landingPage",
         "loginPage",
@@ -108,7 +117,7 @@ function showAuthPage(page) {
         $(id)?.classList.add("hidden");
     });
 
-    $(page)?.classList.remove("hidden");
+    target.classList.remove("hidden");
 }
 
 function showLanding() {
@@ -166,7 +175,7 @@ function applyRolePermissions() {
     }
 
     if ($("welcomeName")) {
-        $("welcomeName").textContent = `Welcome back, ${getUserName()}`;
+        $("welcomeName").textContent = getUserName();
     }
 
     if ($("rolePill")) {
@@ -175,6 +184,7 @@ function applyRolePermissions() {
 }
 
 /* SIDEBAR NAVIGATION */
+
 function showPage(page) {
     const pageSections = {
         overview: "overview",
@@ -188,23 +198,31 @@ function showPage(page) {
         users: "users"
     };
 
+    if (!isAdmin() && ["stock-in", "stock-out", "users"].includes(page)) {
+        showToast("You do not have permission to access this page.", "error");
+        showPage("overview");
+        return;
+    }
+
     const sectionId = pageSections[page];
 
     if (!sectionId) {
         console.error("Invalid page:", page);
-        showToast("Page not found", "error");
+        showToast("Page not found.", "error");
         return;
     }
 
-    const section = document.getElementById(sectionId);
+    const section = $(sectionId);
 
     if (!section) {
         console.error("Section not found:", sectionId);
-        showToast("Page not found: " + page, "error");
+        showToast(`Page section not found: ${page}`, "error");
         return;
     }
 
-    document.querySelectorAll(".page-section").forEach(item => {
+    state.currentPage = page;
+
+    document.querySelectorAll(".page-section").forEach((item) => {
         item.classList.add("hidden");
         item.classList.remove("active");
     });
@@ -212,7 +230,7 @@ function showPage(page) {
     section.classList.remove("hidden");
     section.classList.add("active");
 
-    document.querySelectorAll(".nav-link").forEach(link => {
+    document.querySelectorAll(".nav-link").forEach((link) => {
         link.classList.toggle("active", link.dataset.page === page);
     });
 
@@ -228,19 +246,21 @@ function showPage(page) {
         users: "User Management"
     };
 
-    const title = document.getElementById("pageTitle");
-    if (title) title.textContent = pageTitles[page];
+    if ($("pageTitle")) {
+        $("pageTitle").textContent = pageTitles[page];
+    }
 
     if (typeof loadPageData === "function") {
         loadPageData(page);
     }
+
     if (page === "analysis") {
         loadAnalysisImages();
     }
 
     if (page === "users") {
-    loadUserManagement();
-}
+        loadUserManagement();
+    }
 }
 
 function bindNavigationEvents() {
@@ -324,10 +344,18 @@ function bindAuthEvents() {
     $("loginToSignup")?.addEventListener("click", showSignup);
     $("signupToLogin")?.addEventListener("click", showLogin);
 
+    $("backToLandingLogin")?.addEventListener("click", showLanding);
     $("backToLanding")?.addEventListener("click", showLanding);
     $("backToLandingSignup")?.addEventListener("click", showLanding);
 
     $("pendingLogin")?.addEventListener("click", showLogin);
+
+    document.querySelectorAll('[data-auth="signup"]').forEach((button) => {
+        button.addEventListener("click", (event) => {
+            event.preventDefault();
+            showSignup();
+        });
+    });
 
     $("loginForm")?.addEventListener("submit", handleLogin);
     $("signupForm")?.addEventListener("submit", handleSignup);
@@ -338,11 +366,16 @@ function bindAuthEvents() {
 async function handleLogin(event) {
     event.preventDefault();
 
-    const identifier = $("loginIdentifier")?.value.trim();
-    const password = $("loginPassword")?.value;
+    const identifier = (
+        $("loginUsername")?.value ||
+        $("loginIdentifier")?.value ||
+        ""
+    ).trim();
+
+    const password = $("loginPassword")?.value || "";
 
     if (!identifier || !password) {
-        showMessage("loginMessage", "Enter your username/email and password.");
+        showMessage("loginMessage", "Enter your username and password.");
         return;
     }
 
@@ -355,27 +388,36 @@ async function handleLogin(event) {
             body: JSON.stringify({ identifier, password })
         });
 
-        if (data.status === "PENDING") {
+        const status = String(data.status || "SUCCESS").toUpperCase();
+
+        if (status === "PENDING") {
             showPending();
             return;
         }
 
-        if (data.status === "REJECTED") {
+        if (status === "REJECTED") {
             showMessage("loginMessage", "Your account registration was rejected.");
             return;
         }
 
-        if (data.status === "INACTIVE") {
-            showMessage("loginMessage", "Your account is inactive. Contact the administrator.");
+        if (status === "INACTIVE") {
+            showMessage(
+                "loginMessage",
+                "Your account is inactive. Contact the administrator."
+            );
             return;
         }
 
-        if (data.status && data.status !== "SUCCESS") {
+        if (!["SUCCESS", "APPROVED", "ACTIVE"].includes(status)) {
             showMessage("loginMessage", data.message || "Login failed.");
             return;
         }
 
         state.user = data.user || data;
+
+        if (!state.user || !(state.user.user_id || state.user.id || state.user.username)) {
+            throw new Error("Login response did not contain valid user information.");
+        }
 
         await enterDashboard();
     } catch (error) {
@@ -446,6 +488,7 @@ async function handleLogout() {
     state.transactions = [];
     state.lowStock = [];
     state.pendingUsers = [];
+    state.approvedUsers = [];
 
     if (state.chart) {
         state.chart.destroy();
@@ -458,15 +501,19 @@ async function handleLogout() {
 async function checkSession() {
     try {
         const data = await apiRequest("/me");
-        state.user = data.user || data;
 
-        if (!state.user || !(state.user.user_id || state.user.id || state.user.username)) {
+        state.user = data.user || null;
+
+        if (!state.user ||
+            !(state.user.user_id || state.user.id || state.user.username)) {
+            state.user = null;
             showLanding();
             return;
         }
 
         await enterDashboard();
     } catch (error) {
+        state.user = null;
         showLanding();
     }
 }
@@ -474,6 +521,11 @@ async function checkSession() {
 /* ENTER DASHBOARD */
 
 async function enterDashboard() {
+    if (!state.user) {
+        showLanding();
+        return;
+    }
+
     showAuthPage("appLayout");
 
     applyRolePermissions();
@@ -539,6 +591,10 @@ function bindDashboardEvents() {
 /* LOAD DASHBOARD DATA */
 
 async function loadDashboardData() {
+    const refreshButton = $("refreshDataBtn");
+
+    if (refreshButton) refreshButton.disabled = true;
+
     try {
         const results = await Promise.allSettled([
             apiRequest("/products"),
@@ -577,6 +633,8 @@ async function loadDashboardData() {
         }
     } catch (error) {
         showToast(error.message || "Unable to load dashboard.", "error");
+    } finally {
+        if (refreshButton) refreshButton.disabled = false;
     }
 }
 
@@ -607,10 +665,21 @@ function renderStats() {
 
     const lowStockCount = state.products.filter(isLowStock).length;
 
-    if ($("totalProducts")) $("totalProducts").textContent = number(totalProducts);
-    if ($("totalUnits")) $("totalUnits").textContent = number(totalUnits);
-    if ($("inventoryValue")) $("inventoryValue").textContent = money(inventoryValue);
-    if ($("lowStockCount")) $("lowStockCount").textContent = number(lowStockCount);
+    if ($("totalProducts")) {
+        $("totalProducts").textContent = number(totalProducts);
+    }
+
+    if ($("totalUnits")) {
+        $("totalUnits").textContent = number(totalUnits);
+    }
+
+    if ($("inventoryValue")) {
+        $("inventoryValue").textContent = money(inventoryValue);
+    }
+
+    if ($("lowStockCount")) {
+        $("lowStockCount").textContent = number(lowStockCount);
+    }
 
     if ($("productCount")) {
         $("productCount").textContent = `${totalProducts} products`;
@@ -654,8 +723,14 @@ function renderProducts() {
                     </td>
                     ${isAdmin() ? `
                     <td>
-                        <button class="table-action" data-edit-product="${escapeHTML(getProductId(product))}">Edit</button>
-                        <button class="table-action delete" data-delete-product="${escapeHTML(getProductId(product))}">Delete</button>
+                        <button class="table-action"
+                            data-edit-product="${escapeHTML(getProductId(product))}">
+                            Edit
+                        </button>
+                        <button class="table-action delete"
+                            data-delete-product="${escapeHTML(getProductId(product))}">
+                            Delete
+                        </button>
                     </td>` : ""}
                 </tr>
             `;
@@ -695,12 +770,18 @@ function openProductModal(product = null) {
     }
 
     if (product) {
-        $("productSku").value = product.sku || "";
-        $("productName").value = getProductName(product);
-        $("productCategory").value = product.category || "";
-        $("productOpeningStock").value = product.opening_stock ?? 0;
-        $("productReorderLevel").value = product.reorder_level ?? 10;
-        $("productUnitCost").value = product.unit_cost ?? 0;
+        if ($("productSku")) $("productSku").value = product.sku || "";
+        if ($("productName")) $("productName").value = getProductName(product);
+        if ($("productCategory")) $("productCategory").value = product.category || "";
+        if ($("productOpeningStock")) {
+            $("productOpeningStock").value = product.opening_stock ?? 0;
+        }
+        if ($("productReorderLevel")) {
+            $("productReorderLevel").value = product.reorder_level ?? 10;
+        }
+        if ($("productUnitCost")) {
+            $("productUnitCost").value = product.unit_cost ?? 0;
+        }
     }
 
     $("productModal")?.classList.remove("hidden");
@@ -718,12 +799,12 @@ async function saveProduct(event) {
     const productId = $("editProductId")?.value;
 
     const product = {
-        sku: $("productSku").value.trim(),
-        product_name: $("productName").value.trim(),
-        category: $("productCategory").value.trim(),
-        opening_stock: Number($("productOpeningStock").value),
-        reorder_level: Number($("productReorderLevel").value),
-        unit_cost: Number($("productUnitCost").value)
+        sku: $("productSku")?.value.trim() || "",
+        product_name: $("productName")?.value.trim() || "",
+        category: $("productCategory")?.value.trim() || "",
+        opening_stock: Number($("productOpeningStock")?.value),
+        reorder_level: Number($("productReorderLevel")?.value),
+        unit_cost: Number($("productUnitCost")?.value)
     };
 
     if (!product.sku || !product.product_name) {
@@ -731,7 +812,9 @@ async function saveProduct(event) {
         return;
     }
 
-    if (Object.values(product).some((value) => value === "" || Number.isNaN(value))) {
+    if (Object.values(product).some(
+        (value) => value === "" || Number.isNaN(value) || value < 0
+    )) {
         showMessage("productFormMessage", "Enter valid product details.");
         return;
     }
@@ -748,7 +831,9 @@ async function saveProduct(event) {
         closeProductModal();
         await loadDashboardData();
 
-        showToast(productId ? "Product updated successfully." : "Product added successfully.");
+        showToast(
+            productId ? "Product updated successfully." : "Product added successfully."
+        );
     } catch (error) {
         showMessage("productFormMessage", error.message || "Unable to save product.");
     } finally {
@@ -762,9 +847,11 @@ async function deleteProduct(productId) {
     if (!confirm("Are you sure you want to delete this product?")) return;
 
     try {
-        await apiRequest(`/products/${productId}`, { method: "DELETE" });
-        await loadDashboardData();
+        await apiRequest(`/products/${encodeURIComponent(productId)}`, {
+            method: "DELETE"
+        });
 
+        await loadDashboardData();
         showToast("Product deleted successfully.");
     } catch (error) {
         showToast(error.message || "Unable to delete product.", "error");
@@ -832,7 +919,9 @@ function renderStockDropdowns() {
             `).join("")}
         `;
 
-        if (state.suppliers.some((supplier) => String(getSupplierId(supplier)) === selected)) {
+        if (state.suppliers.some(
+            (supplier) => String(getSupplierId(supplier)) === selected
+        )) {
             supplierSelect.value = selected;
         }
 
@@ -873,9 +962,9 @@ async function saveSupplier(event) {
     if (!isAdmin()) return;
 
     const supplier = {
-        supplier_name: $("supplierName").value.trim(),
-        phone_number: $("supplierPhone").value.trim(),
-        email: $("supplierEmail").value.trim()
+        supplier_name: $("supplierName")?.value.trim() || "",
+        phone_number: $("supplierPhone")?.value.trim() || "",
+        email: $("supplierEmail")?.value.trim() || ""
     };
 
     if (!supplier.supplier_name) {
@@ -1014,7 +1103,7 @@ function renderTransactions() {
     const overviewTable = $("overviewTransactionsTable");
 
     if (overviewTable) {
-        overviewTable.innerHTML = rows.slice(0, 5).length
+        overviewTable.innerHTML = rows.length
             ? rows.slice(0, 5).map((transaction) => `
                 <tr>
                     <td>${escapeHTML(transaction.product_name || transaction.name || transaction.sku || "—")}</td>
@@ -1029,12 +1118,21 @@ function renderTransactions() {
 
 async function downloadTransactions() {
     try {
-        const response = await fetch("/transactions/download", {
+        const response = await fetch(API_BASE + "/transactions/download", {
             credentials: "include"
         });
 
         if (!response.ok) {
-            throw new Error("Unable to download transactions.");
+            let message = "Unable to download transactions.";
+
+            try {
+                const data = await response.json();
+                message = data.message || data.error || message;
+            } catch (error) {
+                // Keep the default error message.
+            }
+
+            throw new Error(message);
         }
 
         const blob = await response.blob();
@@ -1048,7 +1146,7 @@ async function downloadTransactions() {
         link.click();
         link.remove();
 
-        URL.revokeObjectURL(url);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (error) {
         showToast(error.message || "Download failed.", "error");
     }
@@ -1102,11 +1200,26 @@ function renderMovementChart() {
     const daily = {};
 
     state.transactions.forEach((transaction) => {
-        const date = getTransactionDate(transaction);
-        if (date === "—") return;
+        const rawDate = transaction.transaction_date ||
+            transaction.created_at ||
+            transaction.date;
+
+        if (!rawDate) return;
+
+        const dateObject = new Date(rawDate);
+
+        const date = Number.isNaN(dateObject.getTime())
+            ? String(rawDate)
+            : dateObject.toLocaleDateString("en-IN");
 
         if (!daily[date]) {
-            daily[date] = { stockIn: 0, stockOut: 0 };
+            daily[date] = {
+                stockIn: 0,
+                stockOut: 0,
+                timestamp: Number.isNaN(dateObject.getTime())
+                    ? 0
+                    : dateObject.getTime()
+            };
         }
 
         const type = getTransactionType(transaction);
@@ -1119,10 +1232,13 @@ function renderMovementChart() {
         }
     });
 
-    const labels = Object.keys(daily).slice(-7);
+    const labels = Object.keys(daily)
+        .sort((a, b) => daily[a].timestamp - daily[b].timestamp)
+        .slice(-7);
 
     if (state.chart) {
         state.chart.destroy();
+        state.chart = null;
     }
 
     state.chart = new Chart(canvas, {
@@ -1178,7 +1294,7 @@ function loadAnalysisImages() {
         const source = image.dataset.src;
 
         if (source) {
-            image.src = `${source}?t=${Date.now()}`;
+            image.src = `${source}${source.includes("?") ? "&" : "?"}t=${Date.now()}`;
         }
     });
 }
@@ -1201,7 +1317,6 @@ async function refreshCharts() {
         if (button) button.disabled = false;
     }
 }
-
 
 /* USER MANAGEMENT */
 
@@ -1269,12 +1384,10 @@ async function loadApprovedUsers() {
 
 function renderPendingUsers() {
     const table = $("pendingUsersTable");
-
     if (!table) return;
 
     if ($("pendingCount")) {
-        $("pendingCount").textContent =
-            `${state.pendingUsers.length} Pending`;
+        $("pendingCount").textContent = `${state.pendingUsers.length} Pending`;
     }
 
     if (!state.pendingUsers.length) {
@@ -1286,7 +1399,7 @@ function renderPendingUsers() {
         return;
     }
 
-    table.innerHTML = state.pendingUsers.map(user => `
+    table.innerHTML = state.pendingUsers.map((user) => `
         <tr>
             <td>${escapeHTML(user.full_name)}</td>
             <td>${escapeHTML(user.username)}</td>
@@ -1312,12 +1425,10 @@ function renderPendingUsers() {
 
 function renderApprovedUsers() {
     const table = $("approvedUsersTable");
-
     if (!table) return;
 
     if ($("approvedCount")) {
-        $("approvedCount").textContent =
-            `${state.approvedUsers.length} Approved`;
+        $("approvedCount").textContent = `${state.approvedUsers.length} Approved`;
     }
 
     if (!state.approvedUsers.length) {
@@ -1329,7 +1440,7 @@ function renderApprovedUsers() {
         return;
     }
 
-    table.innerHTML = state.approvedUsers.map(user => `
+    table.innerHTML = state.approvedUsers.map((user) => `
         <tr>
             <td>${escapeHTML(user.full_name)}</td>
             <td>${escapeHTML(user.username)}</td>
@@ -1346,14 +1457,12 @@ async function handlePendingUserClick(event) {
     const rejectButton = event.target.closest(".reject-user-btn");
 
     if (!approveButton && !rejectButton) return;
-
     if (!isAdmin()) return;
 
     const button = approveButton || rejectButton;
     const userId = button.dataset.id;
 
     const approvalStatus = approveButton ? "APPROVED" : "REJECTED";
-
     const action = approveButton ? "approve" : "reject";
 
     if (!userId) {
@@ -1368,7 +1477,7 @@ async function handlePendingUserClick(event) {
     const row = button.closest("tr");
 
     if (row) {
-        row.querySelectorAll("button").forEach(item => {
+        row.querySelectorAll("button").forEach((item) => {
             item.disabled = true;
         });
     }
@@ -1392,15 +1501,11 @@ async function handlePendingUserClick(event) {
         );
 
         await loadUserManagement();
-
     } catch (error) {
-        showToast(
-            error.message || `Unable to ${action} this account.`,
-            "error"
-        );
+        showToast(error.message || `Unable to ${action} this account.`, "error");
 
         if (row) {
-            row.querySelectorAll("button").forEach(item => {
+            row.querySelectorAll("button").forEach((item) => {
                 item.disabled = false;
             });
         }
