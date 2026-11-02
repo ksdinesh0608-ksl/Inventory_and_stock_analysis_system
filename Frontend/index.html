@@ -109,6 +109,64 @@
 <footer><div class="wrap"><span class="ser" style="font-size:22px;color:var(--forest)">Stockwise</span><span>Inventory and Stock Analysis System</span></div></footer>
 
 </section>
+
+<!-- LOGIN PAGE -->
+<section id="loginPage" class="auth-page auth-screen hidden">
+    <aside class="auth-visual">
+        <div class="brand">
+            <div class="brand-icon">S</div>
+            <div>
+                Stockwise
+                <small>INVENTORY MANAGEMENT</small>
+            </div>
+        </div>
+
+        <div class="auth-visual-content">
+            <h1>Welcome <span>back.</span></h1>
+            <p>Log in to manage your inventory, track stock movements and understand your business better.</p>
+        </div>
+
+        <div class="auth-visual-bottom">Simple. Organized. Efficient.</div>
+    </aside>
+
+    <div class="auth-form-side">
+        <form id="loginForm" class="auth-form">
+            <p class="eyebrow">WELCOME BACK</p>
+            <h2>Login to Stockwise</h2>
+            <p>Enter your account details to continue.</p>
+
+            <label>
+                Username
+                <input id="loginUsername" type="text"
+                    placeholder="Enter your username"
+                    autocomplete="username" required>
+            </label>
+
+            <label>
+                Password
+                <input id="loginPassword" type="password"
+                    placeholder="Enter your password"
+                    autocomplete="current-password" required>
+            </label>
+
+            <p id="loginMessage" class="auth-message" aria-live="polite"></p>
+
+            <button type="submit" class="button button-primary" id="loginSubmit">
+                Login
+            </button>
+
+            <div class="auth-switch">
+                Don't have an account?
+                <button type="button" class="text-button" id="loginToSignup">Sign up</button>
+            </div>
+
+            <button type="button" class="back-link" id="backToLandingLogin">
+                Back to home
+            </button>
+        </form>
+    </div>
+</section>
+
 <!-- SIGNUP PAGE -->
 <section id="signupPage" class="auth-page auth-screen hidden">
     <aside class="auth-visual">
