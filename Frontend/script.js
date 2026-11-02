@@ -1073,82 +1073,57 @@ async function handleStockOut(event) {
 
 function renderTransactions() {
     const table = $("transactionsTable");
-    if (!table) return;
+    const overviewTable = $("overviewTransactionsTable");
 
     const rows = state.transactions.slice().reverse();
 
-    table.innerHTML = rows.length
-        ? rows.map((transaction) => {
-            const type = getTransactionType(transaction);
-            const stockIn = type === "STOCK_IN";
+    if (table) {
+        table.innerHTML = rows.length
+            ? rows.map((transaction) => {
+                const type = getTransactionType(transaction);
+                const stockIn = type === "STOCK_IN";
 
-            return `
-                <tr>
-                    <td>${escapeHTML(getTransactionDate(transaction))}</td>
-                    <td>${escapeHTML(transaction.sku || "—")}</td>
-                    <td>${escapeHTML(transaction.product_name || transaction.name || "—")}</td>
-                    <td>
-                        <span class="stock-status ${stockIn ? "" : "low"}">
-                            ${escapeHTML(type || "—")}
-                        </span>
-                    </td>
-                    <td>${number(transaction.quantity)}</td>
-                    <td>${escapeHTML(transaction.supplier_name || "—")}</td>
-                    <td>${escapeHTML(transaction.notes || "—")}</td>
-                </tr>
-            `;
-        }).join("")
-        : `<tr><td colspan="7">No transactions found.</td></tr>`;
-
-    const overviewTable = $("overviewTransactionsTable");
+                return `
+                    <tr>
+                        <td>${escapeHTML(getTransactionDate(transaction))}</td>
+                        <td>${escapeHTML(transaction.sku || "—")}</td>
+                        <td>${escapeHTML(transaction.product_name || transaction.name || "—")}</td>
+                        <td>
+                            <span class="stock-status ${stockIn ? "" : "low"}">
+                                ${escapeHTML(type || "—")}
+                            </span>
+                        </td>
+                        <td>${number(transaction.quantity)}</td>
+                        <td>${escapeHTML(transaction.supplier_name || "—")}</td>
+                        <td>${escapeHTML(transaction.notes || "—")}</td>
+                    </tr>
+                `;
+            }).join("")
+            : `<tr><td colspan="7">No transactions found.</td></tr>`;
+    }
 
     if (overviewTable) {
         overviewTable.innerHTML = rows.length
-            ? rows.slice(0, 5).map((transaction) => `
-                <tr>
-                    <td>${escapeHTML(transaction.product_name || transaction.name || transaction.sku || "—")}</td>
-                    <td>${escapeHTML(getTransactionType(transaction))}</td>
-                    <td>${number(transaction.quantity)}</td>
-                    <td>${escapeHTML(getTransactionDate(transaction))}</td>
-                </tr>
-            `).join("")
-            : `<tr><td colspan="4">No recent transactions.</td></tr>`;
-    }
-}
+            ? rows.slice(0, 5).map((transaction) => {
+                const type = getTransactionType(transaction);
+                const stockIn = type === "STOCK_IN";
 
-async function downloadTransactions() {
-    try {
-        const response = await fetch(API_BASE + "/transactions/download", {
-            credentials: "include"
-        });
-
-        if (!response.ok) {
-            let message = "Unable to download transactions.";
-
-            try {
-                const data = await response.json();
-                message = data.message || data.error || message;
-            } catch (error) {
-                // Keep the default error message.
-            }
-
-            throw new Error(message);
-        }
-
-        const blob = await response.blob();
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement("a");
-
-        link.href = url;
-        link.download = "stock_transactions.csv";
-
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-
-        setTimeout(() => URL.revokeObjectURL(url), 1000);
-    } catch (error) {
-        showToast(error.message || "Download failed.", "error");
+                return `
+                    <tr>
+                        <td>${escapeHTML(getTransactionDate(transaction))}</td>
+                        <td>${escapeHTML(transaction.product_name || transaction.name || "—")}</td>
+                        <td>
+                            <span class="stock-status ${stockIn ? "" : "low"}">
+                                ${escapeHTML(type || "—")}
+                            </span>
+                        </td>
+                        <td>${number(transaction.quantity)}</td>
+                        <td>${escapeHTML(transaction.supplier_name || "—")}</td>
+                        <td>${escapeHTML(transaction.notes || "—")}</td>
+                    </tr>
+                `;
+            }).join("")
+            : `<tr><td colspan="6">No recent transactions.</td></tr>`;
     }
 }
 
